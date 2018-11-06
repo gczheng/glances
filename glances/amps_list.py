@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -74,9 +74,9 @@ class AmpsList(object):
                 try:
                     amp = __import__(os.path.basename(amp_script)[:-3])
                 except ImportError as e:
-                    logger.warning("Cannot load {}, you need to install an external Python package ({})".format(os.path.basename(amp_script), e))
+                    logger.warning("Missing Python Lib ({}), cannot load {} AMP".format(e, amp_conf_name))
                 except Exception as e:
-                    logger.warning("Cannot load {} ({})".format(os.path.basename(amp_script), e))
+                    logger.warning("Cannot load {} AMP ({})".format(amp_conf_name, e))
                 else:
                     # Add the AMP to the dictionary
                     # The key is the AMP name
@@ -104,20 +104,22 @@ class AmpsList(object):
 
     def update(self):
         """Update the command result attributed."""
-        # Search application monitored processes by a regular expression
-        processlist = glances_processes.getalllist()
+        # Get the current processes list (once)
+        processlist = glances_processes.getlist()
+
         # Iter upon the AMPs dict
         for k, v in iteritems(self.get()):
             if not v.enable():
                 # Do not update if the enable tag is set
                 continue
-            try:
-                amps_list = [p for p in processlist for c in p['cmdline'] if re.search(v.regex(), c) is not None]
-            except TypeError:
-                continue
+
+            amps_list = self._build_amps_list(v, processlist)
+
             if len(amps_list) > 0:
                 # At least one process is matching the regex
-                logger.debug("AMPS: {} process detected (PID={})".format(k, amps_list[0]['pid']))
+                logger.debug("AMPS: {} processes {} detected ({})".format(len(amps_list),
+                                                                          k,
+                                                                          amps_list))
                 # Call the AMP update method
                 thread = threading.Thread(target=v.update_wrapper, args=[amps_list])
                 thread.start()
@@ -125,10 +127,37 @@ class AmpsList(object):
                 # Set the process number to 0
                 v.set_count(0)
                 if v.count_min() is not None and v.count_min() > 0:
-                    # Only display the "No running process message" is countmin is defined
+                    # Only display the "No running process message" if countmin is defined
                     v.set_result("No running process")
 
         return self.__amps_dict
+
+    def _build_amps_list(self, amp_value, processlist):
+        """Return the AMPS process list according to the amp_value
+
+        Search application monitored processes by a regular expression
+        """
+        ret = []
+        try:
+            # Search in both cmdline and name (for kernel thread, see #1261)
+            for p in processlist:
+                add_it = False
+                if (re.search(amp_value.regex(), p['name']) is not None):
+                    add_it = True
+                else:
+                    for c in p['cmdline']:
+                        if (re.search(amp_value.regex(), c) is not None):
+                            add_it = True
+                            break
+                if add_it:
+                    ret.append({'pid': p['pid'],
+                                'cpu_percent': p['cpu_percent'],
+                                'memory_percent': p['memory_percent']})
+
+        except (TypeError, KeyError) as e:
+            logger.debug("Can not build AMPS list ({})".format(e))
+
+        return ret
 
     def getList(self):
         """Return the AMPs list."""

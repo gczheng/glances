@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -37,7 +37,7 @@ class Export(GlancesExport):
         super(Export, self).__init__(config=config, args=args)
 
         # CSV file name
-        self.csv_filename = args.export_csv
+        self.csv_filename = args.export_csv_file
 
         # Set the CSV output file
         try:
@@ -65,7 +65,7 @@ class Export(GlancesExport):
         """Update stats in the CSV output file."""
         # Get the stats
         all_stats = stats.getAllExports()
-        plugins = stats.getAllPlugins()
+        plugins = stats.getPluginsList()
 
         # Init data with timestamp (issue#708)
         if self.first_line:

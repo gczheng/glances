@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -20,6 +20,7 @@
 """Sensors plugin."""
 
 import psutil
+import warnings
 
 from glances.logger import logger
 from glances.compat import iteritems
@@ -37,7 +38,6 @@ def to_fahrenheit(celsius):
 
 
 class Plugin(GlancesPlugin):
-
     """Glances sensors plugin.
 
     The stats list includes both sensors and hard disks stats, if any.
@@ -47,7 +47,8 @@ class Plugin(GlancesPlugin):
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args)
+        super(Plugin, self).__init__(args=args,
+                                     stats_init_value=[])
 
         # Init the sensor class
         self.glancesgrabsensors = GlancesGrabSensors()
@@ -63,27 +64,20 @@ class Plugin(GlancesPlugin):
         # We want to display the stat in the curse interface
         self.display_curse = True
 
-        # Init the stats
-        self.reset()
-
     def get_key(self):
         """Return the key of the list."""
         return 'label'
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = []
 
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update sensors stats using the input method."""
-        # Reset the stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         if self.input_method == 'local':
             # Update stats using the dedicated lib
-            self.stats = []
+            stats = []
             # Get the temperature
             try:
                 temperature = self.__set_type(self.glancesgrabsensors.get('temperature_core'),
@@ -92,7 +86,7 @@ class Plugin(GlancesPlugin):
                 logger.error("Cannot grab sensors temperatures (%s)" % e)
             else:
                 # Append temperature
-                self.stats.extend(temperature)
+                stats.extend(temperature)
             # Get the FAN speed
             try:
                 fan_speed = self.__set_type(self.glancesgrabsensors.get('fan_speed'),
@@ -101,7 +95,7 @@ class Plugin(GlancesPlugin):
                 logger.error("Cannot grab FAN speed (%s)" % e)
             else:
                 # Append FAN speed
-                self.stats.extend(fan_speed)
+                stats.extend(fan_speed)
             # Update HDDtemp stats
             try:
                 hddtemp = self.__set_type(self.hddtemp_plugin.update(),
@@ -110,7 +104,7 @@ class Plugin(GlancesPlugin):
                 logger.error("Cannot grab HDD temperature (%s)" % e)
             else:
                 # Append HDD temperature
-                self.stats.extend(hddtemp)
+                stats.extend(hddtemp)
             # Update batteries stats
             try:
                 batpercent = self.__set_type(self.batpercent_plugin.update(),
@@ -119,7 +113,7 @@ class Plugin(GlancesPlugin):
                 logger.error("Cannot grab battery percent (%s)" % e)
             else:
                 # Append Batteries %
-                self.stats.extend(batpercent)
+                stats.extend(batpercent)
 
         elif self.input_method == 'snmp':
             # Update stats using SNMP
@@ -127,6 +121,9 @@ class Plugin(GlancesPlugin):
             # http://www.net-snmp.org/wiki/index.php/Net-SNMP_and_lm-sensors_on_Ubuntu_10.04
 
             pass
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
@@ -162,20 +159,23 @@ class Plugin(GlancesPlugin):
             else:
                 self.views[i[self.get_key()]]['value']['decoration'] = self.get_alert(i['value'], header=i['type'])
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the dict to display in the curse interface."""
         # Init the return message
         ret = []
 
         # Only process if stats exist and display plugin enable...
-        if not self.stats or args.disable_sensors:
+        if not self.stats or self.is_disable():
             return ret
 
-        # Build the string message
+        # Max size for the interface name
+        name_max_width = max_width - 12
+
         # Header
-        msg = '{:18}'.format('SENSORS')
+        msg = '{:{width}}'.format('SENSORS', width=name_max_width)
         ret.append(self.curse_add_line(msg, "TITLE"))
 
+        # Stats
         for i in self.stats:
             # Do not display anything if no battery are detected
             if i['type'] == 'battery' and i['value'] == []:
@@ -186,13 +186,11 @@ class Plugin(GlancesPlugin):
             label = self.has_alias(i['label'].lower())
             if label is None:
                 label = i['label']
-            if i['type'] != 'fan_speed':
-                msg = '{:15}'.format(label[:15])
-            else:
-                msg = '{:13}'.format(label[:13])
+            msg = '{:{width}}'.format(label[:name_max_width],
+                                      width=name_max_width)
             ret.append(self.curse_add_line(msg))
             if i['value'] in (b'ERR', b'SLP', b'UNK', b'NOS'):
-                msg = '{:>8}'.format(i['value'])
+                msg = '{:>13}'.format(i['value'])
                 ret.append(self.curse_add_line(
                     msg, self.get_views(item=i[self.get_key()],
                                         key='value',
@@ -206,7 +204,7 @@ class Plugin(GlancesPlugin):
                     value = i['value']
                     unit = i['unit']
                 try:
-                    msg = '{:>7.0f}{}'.format(value, unit)
+                    msg = '{:>13.0f}{}'.format(value, unit)
                     ret.append(self.curse_add_line(
                         msg, self.get_views(item=i[self.get_key()],
                                             key='value',
@@ -218,7 +216,6 @@ class Plugin(GlancesPlugin):
 
 
 class GlancesGrabSensors(object):
-
     """Get sensors stats."""
 
     def __init__(self):
@@ -227,32 +224,31 @@ class GlancesGrabSensors(object):
         self.init_temp = False
         self.stemps = {}
         try:
-            # psutil>=5.1.0 is required
+            # psutil>=5.1.0, Linux-only
             self.stemps = psutil.sensors_temperatures()
         except AttributeError:
-            logger.warning("PsUtil 5.1.0 or higher is needed to grab temperatures sensors")
-        except OSError as e:
-            # FreeBSD: If oid 'hw.acpi.battery' not present, Glances wont start #1055
-            logger.error("Can not grab temperatures sensors ({})".format(e))
+            logger.debug("Cannot grab temperatures. Platform not supported.")
         else:
             self.init_temp = True
+            # Solve an issue #1203 concerning a RunTimeError warning message displayed
+            # in the curses interface.
+            warnings.filterwarnings("ignore")
 
         # Fans
         self.init_fan = False
         self.sfans = {}
         try:
-            # psutil>=5.2.0 is required
+            # psutil>=5.2.0, Linux-only
             self.sfans = psutil.sensors_fans()
         except AttributeError:
-            logger.warning("PsUtil 5.2.0 or higher is needed to grab fans sensors")
-        except OSError as e:
-            logger.error("Can not grab fans sensors ({})".format(e))
+            logger.debug("Cannot grab fans speed. Platform not supported.")
         else:
             self.init_fan = True
 
-        # !!! Disable Fan: High CPU consumption is PSUtil 5.2.0
-        # Delete the following line when corrected
+        # !!! Disable Fan: High CPU consumption with psutil 5.2.0 or higher
+        # Delete the two followings lines when corrected (https://github.com/giampaolo/psutil/issues/1199)
         self.init_fan = False
+        logger.debug("Fan speed sensors disable (see https://github.com/giampaolo/psutil/issues/1199)")
 
         # Init the stats
         self.reset()
@@ -282,7 +278,8 @@ class GlancesGrabSensors(object):
 
         type: SENSOR_TEMP_UNIT or SENSOR_FAN_UNIT
 
-        output: a list"""
+        output: a list
+        """
         ret = []
         if type == SENSOR_TEMP_UNIT and self.init_temp:
             input_list = self.stemps

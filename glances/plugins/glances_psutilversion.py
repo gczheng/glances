@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -16,6 +16,8 @@
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+"""psutil plugin."""
 
 from glances import psutil_version_info
 from glances.plugins.glances_plugin import GlancesPlugin
@@ -44,9 +46,9 @@ class Plugin(GlancesPlugin):
         # Reset stats
         self.reset()
 
-        # Return PsUtil version as a tuple
+        # Return psutil version as a tuple
         if self.input_method == 'local':
-            # PsUtil version only available in local
+            # psutil version only available in local
             try:
                 self.stats = psutil_version_info
             except NameError:

@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -45,7 +45,7 @@ one_line=true
 systemctl_cmd=/usr/bin/systemctl --plain
 """
 
-from subprocess import check_output
+from subprocess import check_output, CalledProcessError
 
 from glances.logger import logger
 from glances.compat import iteritems, to_ascii
@@ -71,21 +71,21 @@ class Amp(GlancesAmp):
         logger.debug('{}: Update stats using systemctl {}'.format(self.NAME, self.get('systemctl_cmd')))
         try:
             res = check_output(self.get('systemctl_cmd').split())
-        except OSError as e:
+        except (OSError, CalledProcessError) as e:
             logger.debug('{}: Error while executing systemctl ({})'.format(self.NAME, e))
         else:
             status = {}
             # For each line
             for r in to_ascii(res).split('\n')[1:-8]:
                 # Split per space .*
-                l = r.split()
-                if len(l) > 3:
+                column = r.split()
+                if len(column) > 3:
                     # load column
                     for c in range(1, 3):
                         try:
-                            status[l[c]] += 1
+                            status[column[c]] += 1
                         except KeyError:
-                            status[l[c]] = 1
+                            status[column[c]] = 1
             # Build the output (string) message
             output = 'Services\n'
             for k, v in iteritems(status):

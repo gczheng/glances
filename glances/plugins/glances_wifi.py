@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -21,6 +21,7 @@
 
 import operator
 
+from glances.compat import nativestr
 from glances.logger import logger
 from glances.plugins.glances_plugin import GlancesPlugin
 
@@ -30,28 +31,26 @@ import psutil
 try:
     from wifi.scan import Cell
     from wifi.exceptions import InterfaceError
-except ImportError:
-    logger.debug("Wifi library not found. Glances cannot grab Wifi info.")
-    wifi_tag = False
+except ImportError as e:
+    import_error_tag = True
+    logger.warning("Missing Python Lib ({}), Wifi plugin is disabled".format(e))
 else:
-    wifi_tag = True
+    import_error_tag = False
 
 
 class Plugin(GlancesPlugin):
-
     """Glances Wifi plugin.
+
     Get stats of the current Wifi hotspots.
     """
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args)
+        super(Plugin, self).__init__(args=args,
+                                     stats_init_value=[])
 
         # We want to display the stat in the curse interface
         self.display_curse = True
-
-        # Init the stats
-        self.reset()
 
     def get_key(self):
         """Return the key of the list.
@@ -59,13 +58,6 @@ class Plugin(GlancesPlugin):
         :returns: string -- SSID is the dict key
         """
         return 'ssid'
-
-    def reset(self):
-        """Reset/init the stats to an empty list.
-
-        :returns: None
-        """
-        self.stats = []
 
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
@@ -76,21 +68,21 @@ class Plugin(GlancesPlugin):
 
         :returns: list -- Stats is a list of dict (hotspot)
         """
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         # Exist if we can not grab the stats
-        if not wifi_tag:
-            return self.stats
+        if import_error_tag:
+            return stats
 
         if self.input_method == 'local':
             # Update stats using the standard system lib
 
-            # Grab network interface stat using the PsUtil net_io_counter method
+            # Grab network interface stat using the psutil net_io_counter method
             try:
                 netiocounters = psutil.net_io_counters(pernic=True)
             except UnicodeDecodeError:
-                return self.stats
+                return stats
 
             for net in netiocounters:
                 # Do not take hidden interface into account
@@ -100,8 +92,9 @@ class Plugin(GlancesPlugin):
                 # Grab the stats using the Wifi Python lib
                 try:
                     wifi_cells = Cell.all(net)
-                except InterfaceError:
+                except InterfaceError as e:
                     # Not a Wifi interface
+                    logger.debug("WIFI plugin: Scan InterfaceError ({})".format(e))
                     pass
                 except Exception as e:
                     # Other error
@@ -118,7 +111,7 @@ class Plugin(GlancesPlugin):
                             'encryption_type': wifi_cell.encryption_type if wifi_cell.encrypted else None
                         }
                         # Add the hotspot to the list
-                        self.stats.append(hotspot)
+                        stats.append(hotspot)
 
         elif self.input_method == 'snmp':
             # Update stats using SNMP
@@ -126,15 +119,18 @@ class Plugin(GlancesPlugin):
             # Not implemented yet
             pass
 
+        # Update the stats
+        self.stats = stats
+
         return self.stats
 
     def get_alert(self, value):
         """Overwrite the default get_alert method.
+
         Alert is on signal quality where lower is better...
 
         :returns: string -- Signal alert
         """
-
         ret = 'OK'
         try:
             if value <= self.get_limit('critical', stat_name=self.plugin_name):
@@ -165,15 +161,11 @@ class Plugin(GlancesPlugin):
         ret = []
 
         # Only process if stats exist and display plugin enable...
-        if not self.stats or args.disable_wifi or not wifi_tag:
+        if not self.stats or import_error_tag or self.is_disable():
             return ret
 
         # Max size for the interface name
-        if max_width is not None and max_width >= 23:
-            # Interface size name = max_width - space for encyption + quality
-            ifname_max_width = max_width - 5
-        else:
-            ifname_max_width = 16
+        ifname_max_width = max_width - 5
 
         # Build the string message
         # Header
@@ -184,8 +176,9 @@ class Plugin(GlancesPlugin):
 
         # Hotspot list (sorted by name)
         for i in sorted(self.stats, key=operator.itemgetter(self.get_key())):
-            # Do not display hotspot with no name (/ssid)
-            if i['ssid'] == '':
+            # Do not display hotspot with no name (/ssid)...
+            # of ssid None... See issue #1151
+            if i['ssid'] == '' or i['ssid'] is None:
                 continue
             ret.append(self.curse_new_line())
             # New hotspot
@@ -197,7 +190,8 @@ class Plugin(GlancesPlugin):
             if len(hotspotname) > ifname_max_width:
                 hotspotname = '_' + hotspotname[-ifname_max_width + 1:]
             # Add the new hotspot to the message
-            msg = '{:{width}}'.format(hotspotname, width=ifname_max_width)
+            msg = '{:{width}}'.format(nativestr(hotspotname),
+                                      width=ifname_max_width)
             ret.append(self.curse_add_line(msg))
             msg = '{:>7}'.format(i['signal'], width=ifname_max_width)
             ret.append(self.curse_add_line(msg,

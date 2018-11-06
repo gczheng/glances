@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -19,12 +19,20 @@
 
 """Per-CPU plugin."""
 
+from glances.logger import logger
 from glances.cpu_percent import cpu_percent
 from glances.plugins.glances_plugin import GlancesPlugin
 
+# Define the history items list
+items_history_list = [{'name': 'user',
+                       'description': 'User CPU usage',
+                       'y_unit': '%'},
+                      {'name': 'system',
+                       'description': 'System CPU usage',
+                       'y_unit': '%'}]
+
 
 class Plugin(GlancesPlugin):
-
     """Glances per-CPU plugin.
 
     'stats' is a list of dictionaries that contain the utilization percentages
@@ -33,80 +41,77 @@ class Plugin(GlancesPlugin):
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args)
+        super(Plugin, self).__init__(args=args,
+                                     items_history_list=items_history_list,
+                                     stats_init_value=[])
 
         # We want to display the stat in the curse interface
         self.display_curse = True
-
-        # Init stats
-        self.reset()
 
     def get_key(self):
         """Return the key of the list."""
         return 'cpu_number'
 
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = []
-
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update per-CPU stats using the input method."""
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         # Grab per-CPU stats using psutil's cpu_percent(percpu=True) and
         # cpu_times_percent(percpu=True) methods
         if self.input_method == 'local':
-            self.stats = cpu_percent.get(percpu=True)
+            stats = cpu_percent.get(percpu=True)
         else:
             # Update stats using SNMP
             pass
 
+        # Update the stats
+        self.stats = stats
+
         return self.stats
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the dict to display in the curse interface."""
         # Init the return message
         ret = []
 
-        # No per CPU stat ? Exit...
-        if not self.stats:
-            msg = 'PER CPU not available'
-            ret.append(self.curse_add_line(msg, "TITLE"))
+        # Only process if stats exist...
+        if not self.stats or not self.args.percpu or self.is_disable():
             return ret
 
         # Build the string message
-        # Header
-        msg = '{:8}'.format('PER CPU')
-        ret.append(self.curse_add_line(msg, "TITLE"))
+        if self.is_disable('quicklook'):
+            msg = '{:7}'.format('PER CPU')
+            ret.append(self.curse_add_line(msg, "TITLE"))
 
-        # Total per-CPU usage
-        for cpu in self.stats:
-            try:
-                msg = '{:6.1f}%'.format(cpu['total'])
-            except TypeError:
-                # TypeError: string indices must be integers (issue #1027)
-                msg = '{:>6}%'.format('?')
-            ret.append(self.curse_add_line(msg))
-
-        # Stats per-CPU
+        # Per CPU stats displayed per line
         for stat in ['user', 'system', 'idle', 'iowait', 'steal']:
             if stat not in self.stats[0]:
                 continue
-
-            ret.append(self.curse_new_line())
-            msg = '{:8}'.format(stat + ':')
+            msg = '{:>7}'.format(stat)
             ret.append(self.curse_add_line(msg))
-            for cpu in self.stats:
+
+        # Per CPU stats displayed per column
+        for cpu in self.stats:
+            ret.append(self.curse_new_line())
+            if self.is_disable('quicklook'):
                 try:
-                    msg = '{:6.1f}%'.format(cpu[stat])
+                    msg = '{:6.1f}%'.format(cpu['total'])
                 except TypeError:
                     # TypeError: string indices must be integers (issue #1027)
                     msg = '{:>6}%'.format('?')
+                ret.append(self.curse_add_line(msg))
+            for stat in ['user', 'system', 'idle', 'iowait', 'steal']:
+                if stat not in self.stats[0]:
+                    continue
+                try:
+                    msg = '{:6.1f}%'.format(cpu[stat])
+                except TypeError:
+                    msg = '{:>6}%'.format('?')
                 ret.append(self.curse_add_line(msg,
-                                               self.get_alert(cpu[stat], header=stat)))
+                                               self.get_alert(cpu[stat],
+                                                              header=stat)))
 
-        # Return the message with decoration
         return ret

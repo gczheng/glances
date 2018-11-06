@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -48,15 +48,12 @@ snmp_oid = {'default': {'total': '1.3.6.1.4.1.2021.4.5.0',
 
 # Define the history items list
 # All items in this list will be historised if the --enable-history tag is set
-# 'color' define the graph color in #RGB format
 items_history_list = [{'name': 'percent',
                        'description': 'RAM memory usage',
-                       'color': '#00FF00',
                        'y_unit': '%'}]
 
 
 class Plugin(GlancesPlugin):
-
     """Glances' memory plugin.
 
     stats is a dict
@@ -64,31 +61,25 @@ class Plugin(GlancesPlugin):
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args, items_history_list=items_history_list)
+        super(Plugin, self).__init__(args=args,
+                                     items_history_list=items_history_list)
 
         # We want to display the stat in the curse interface
         self.display_curse = True
-
-        # Init the stats
-        self.reset()
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = {}
 
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update RAM memory stats using the input method."""
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         if self.input_method == 'local':
             # Update stats using the standard system lib
-            # Grab MEM using the PSUtil virtual_memory method
+            # Grab MEM using the psutil virtual_memory method
             vm_stats = psutil.virtual_memory()
 
-            # Get all the memory stats (copy/paste of the PsUtil documentation)
+            # Get all the memory stats (copy/paste of the psutil documentation)
             # total: total physical memory available.
             # available: the actual amount of available memory that can be given instantly to processes that request more memory in bytes; this is calculated by summing different memory values depending on the platform (e.g. free + buffers + cached on Linux) and it is supposed to be used to monitor actual memory usage in a cross platform fashion.
             # percent: the percentage usage calculated as (total - available) / total * 100.
@@ -106,17 +97,17 @@ class Plugin(GlancesPlugin):
                         'active', 'inactive', 'buffers', 'cached',
                         'wired', 'shared']:
                 if hasattr(vm_stats, mem):
-                    self.stats[mem] = getattr(vm_stats, mem)
+                    stats[mem] = getattr(vm_stats, mem)
 
             # Use the 'free'/htop calculation
             # free=available+buffer+cached
-            self.stats['free'] = self.stats['available']
-            if hasattr(self.stats, 'buffers'):
-                self.stats['free'] += self.stats['buffers']
-            if hasattr(self.stats, 'cached'):
-                self.stats['free'] += self.stats['cached']
+            stats['free'] = stats['available']
+            if hasattr(stats, 'buffers'):
+                stats['free'] += stats['buffers']
+            if hasattr(stats, 'cached'):
+                stats['free'] += stats['cached']
             # used=total-free
-            self.stats['used'] = self.stats['total'] - self.stats['free']
+            stats['used'] = stats['total'] - stats['free']
         elif self.input_method == 'snmp':
             # Update stats using SNMP
             if self.short_system_name in ('windows', 'esxi'):
@@ -131,31 +122,34 @@ class Plugin(GlancesPlugin):
                         # The Physical Memory (Windows) or Real Memory (VMware)
                         # gives statistics on RAM usage and availability.
                         if fs in ('Physical Memory', 'Real Memory'):
-                            self.stats['total'] = int(fs_stat[fs]['size']) * int(fs_stat[fs]['alloc_unit'])
-                            self.stats['used'] = int(fs_stat[fs]['used']) * int(fs_stat[fs]['alloc_unit'])
-                            self.stats['percent'] = float(self.stats['used'] * 100 / self.stats['total'])
-                            self.stats['free'] = self.stats['total'] - self.stats['used']
+                            stats['total'] = int(fs_stat[fs]['size']) * int(fs_stat[fs]['alloc_unit'])
+                            stats['used'] = int(fs_stat[fs]['used']) * int(fs_stat[fs]['alloc_unit'])
+                            stats['percent'] = float(stats['used'] * 100 / stats['total'])
+                            stats['free'] = stats['total'] - stats['used']
                             break
             else:
                 # Default behavor for others OS
-                self.stats = self.get_stats_snmp(snmp_oid=snmp_oid['default'])
+                stats = self.get_stats_snmp(snmp_oid=snmp_oid['default'])
 
-                if self.stats['total'] == '':
+                if stats['total'] == '':
                     self.reset()
                     return self.stats
 
-                for key in iterkeys(self.stats):
-                    if self.stats[key] != '':
-                        self.stats[key] = float(self.stats[key]) * 1024
+                for key in iterkeys(stats):
+                    if stats[key] != '':
+                        stats[key] = float(stats[key]) * 1024
 
                 # Use the 'free'/htop calculation
-                self.stats['free'] = self.stats['free'] - self.stats['total'] + (self.stats['buffers'] + self.stats['cached'])
+                stats['free'] = stats['free'] - stats['total'] + (stats['buffers'] + stats['cached'])
 
                 # used=total-free
-                self.stats['used'] = self.stats['total'] - self.stats['free']
+                stats['used'] = stats['total'] - stats['free']
 
                 # percent: the percentage usage calculated as (total - available) / total * 100.
-                self.stats['percent'] = float((self.stats['total'] - self.stats['free']) / self.stats['total'] * 100)
+                stats['percent'] = float((stats['total'] - stats['free']) / stats['total'] * 100)
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
@@ -172,7 +166,7 @@ class Plugin(GlancesPlugin):
             if key in self.stats:
                 self.views[key]['optional'] = True
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the dict to display in the curse interface."""
         # Init the return message
         ret = []

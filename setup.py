@@ -9,9 +9,12 @@ from io import open
 from setuptools import setup, Command
 
 
-if sys.version_info < (2, 7) or (3, 0) <= sys.version_info < (3, 3):
-    print('Glances requires at least Python 2.7 or 3.3 to run.')
+if sys.version_info < (2, 7) or (3, 0) <= sys.version_info < (3, 4):
+    print('Glances requires at least Python 2.7 or 3.4 to run.')
     sys.exit(1)
+
+PY2 = sys.version_info[0] == 2
+PY3 = sys.version_info[0] == 3
 
 
 # Global functions
@@ -38,7 +41,7 @@ def get_data_files():
 
 
 def get_install_requires():
-    requires = ['psutil>=2.0.0']
+    requires = ['psutil>=5.3.0']
     if sys.platform.startswith('win'):
         requires.append('bottle')
 
@@ -76,19 +79,21 @@ setup(
     url='https://github.com/nicolargo/glances',
     license='LGPLv3',
     keywords="cli curses monitoring system",
+    python_requires=">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*",
     install_requires=get_install_requires(),
     extras_require={
         'action': ['pystache'],
-        'browser': ['zeroconf>=0.17'],
+        # Zeroconf 0.19.1 is the latest one compatible with Python 2 (issue #1293)
+        'browser': ['zeroconf==0.19.1' if PY2 else 'zeroconf>=0.19.1'],
         'cloud': ['requests'],
         'cpuinfo': ['py-cpuinfo'],
-        'chart': ['matplotlib'],
         'docker': ['docker>=2.0.0'],
         'export': ['bernhard', 'cassandra-driver', 'couchdb', 'elasticsearch',
-                   'influxdb>=1.0.0', 'kafka-python', 'pika', 'potsdb',
+                   'influxdb>=1.0.0', 'kafka-python', 'pika', 'paho-mqtt', 'potsdb',
                    'prometheus_client', 'pyzmq', 'statsd'],
         'folders': ['scandir'],  # python_version<"3.5"
-        'gpu': ['nvidia-ml-py'],  # python_version=="2.7"
+        'gpu': ['nvidia-ml-py3'],  # python_version=="2.7"
+        'graph': ['pygal'],
         'ip': ['netifaces'],
         'raid': ['pymdstat'],
         'snmp': ['pysnmp'],
@@ -114,7 +119,6 @@ setup(
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',

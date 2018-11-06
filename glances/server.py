@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -162,7 +162,7 @@ class GlancesInstance(object):
 
     def getAllPlugins(self):
         # Return the plugins list
-        return json.dumps(self.stats.getAllPlugins())
+        return json.dumps(self.stats.getPluginsList())
 
     def getAllLimits(self):
         # Return all the plugins limits

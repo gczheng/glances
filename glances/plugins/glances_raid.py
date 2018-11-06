@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -23,15 +23,17 @@ from glances.compat import iterkeys
 from glances.logger import logger
 from glances.plugins.glances_plugin import GlancesPlugin
 
-# pymdstat only available on GNU/Linux OS
+# Import plugin specific dependency
 try:
     from pymdstat import MdStat
-except ImportError:
-    logger.debug("pymdstat library not found. Glances cannot grab RAID info.")
+except ImportError as e:
+    import_error_tag = True
+    logger.warning("Missing Python Lib ({}), Raid plugin is disabled".format(e))
+else:
+    import_error_tag = False
 
 
 class Plugin(GlancesPlugin):
-
     """Glances RAID plugin.
 
     stats is a dict (see pymdstat documentation)
@@ -44,25 +46,23 @@ class Plugin(GlancesPlugin):
         # We want to display the stat in the curse interface
         self.display_curse = True
 
-        # Init the stats
-        self.reset()
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = {}
-
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update RAID stats using the input method."""
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
+
+        if import_error_tag:
+            return self.stats
 
         if self.input_method == 'local':
             # Update stats using the PyMDstat lib (https://github.com/nicolargo/pymdstat)
             try:
+                # Just for test
+                # mds = MdStat(path='/home/nicolargo/dev/pymdstat/tests/mdstat.10')
                 mds = MdStat()
-                self.stats = mds.get_stats()['arrays']
+                stats = mds.get_stats()['arrays']
             except Exception as e:
                 logger.debug("Can not grab RAID stats (%s)" % e)
                 return self.stats
@@ -72,9 +72,12 @@ class Plugin(GlancesPlugin):
             # No standard way for the moment...
             pass
 
+        # Update the stats
+        self.stats = stats
+
         return self.stats
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the dict to display in the curse interface."""
         # Init the return message
         ret = []
@@ -83,13 +86,16 @@ class Plugin(GlancesPlugin):
         if not self.stats:
             return ret
 
-        # Build the string message
+        # Max size for the interface name
+        name_max_width = max_width - 12
+
         # Header
-        msg = '{:11}'.format('RAID disks')
+        msg = '{:{width}}'.format('RAID disks',
+                                  width=name_max_width)
         ret.append(self.curse_add_line(msg, "TITLE"))
-        msg = '{:>6}'.format('Used')
+        msg = '{:>7}'.format('Used')
         ret.append(self.curse_add_line(msg))
-        msg = '{:>6}'.format('Avail')
+        msg = '{:>7}'.format('Avail')
         ret.append(self.curse_add_line(msg))
         # Data
         arrays = sorted(iterkeys(self.stats))
@@ -97,15 +103,26 @@ class Plugin(GlancesPlugin):
             # New line
             ret.append(self.curse_new_line())
             # Display the current status
-            status = self.raid_alert(self.stats[array]['status'], self.stats[array]['used'], self.stats[array]['available'])
+            status = self.raid_alert(self.stats[array]['status'],
+                                     self.stats[array]['used'],
+                                     self.stats[array]['available'],
+                                     self.stats[array]['type'])
             # Data: RAID type name | disk used | disk available
             array_type = self.stats[array]['type'].upper() if self.stats[array]['type'] is not None else 'UNKNOWN'
-            msg = '{:<5}{:>6}'.format(array_type, array)
+            # Build the full name = array type + array name
+            full_name = '{} {}'.format(array_type, array)
+            msg = '{:{width}}'.format(full_name,
+                                      width=name_max_width)
             ret.append(self.curse_add_line(msg))
-            if self.stats[array]['status'] == 'active':
-                msg = '{:>6}'.format(self.stats[array]['used'])
+            if self.stats[array]['type'] == 'raid0' and self.stats[array]['status'] == 'active':
+                msg = '{:>7}'.format(len(self.stats[array]['components']))
                 ret.append(self.curse_add_line(msg, status))
-                msg = '{:>6}'.format(self.stats[array]['available'])
+                msg = '{:>7}'.format('-')
+                ret.append(self.curse_add_line(msg, status))
+            elif self.stats[array]['status'] == 'active':
+                msg = '{:>7}'.format(self.stats[array]['used'])
+                ret.append(self.curse_add_line(msg, status))
+                msg = '{:>7}'.format(self.stats[array]['available'])
                 ret.append(self.curse_add_line(msg, status))
             elif self.stats[array]['status'] == 'inactive':
                 ret.append(self.curse_new_line())
@@ -122,7 +139,7 @@ class Plugin(GlancesPlugin):
                     ret.append(self.curse_add_line(msg))
                     msg = '{}'.format(component)
                     ret.append(self.curse_add_line(msg))
-            if self.stats[array]['used'] < self.stats[array]['available']:
+            if self.stats[array]['type'] != 'raid0' and (self.stats[array]['used'] < self.stats[array]['available']):
                 # Display current array configuration
                 ret.append(self.curse_new_line())
                 msg = '└─ Degraded mode'
@@ -134,13 +151,15 @@ class Plugin(GlancesPlugin):
 
         return ret
 
-    def raid_alert(self, status, used, available):
+    def raid_alert(self, status, used, available, type):
         """RAID alert messages.
 
         [available/used] means that ideally the array may have _available_
         devices however, _used_ devices are in use.
         Obviously when used >= available then things are good.
         """
+        if type == 'raid0':
+            return 'OK'
         if status == 'inactive':
             return 'CRITICAL'
         if used is None or available is None:

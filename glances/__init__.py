@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -27,7 +27,7 @@ import signal
 import sys
 
 # Global name
-__version__ = '2.11.1'
+__version__ = '3.0.2'
 __author__ = 'Nicolas Hennion <nicolas@nicolargo.com>'
 __license__ = 'LGPLv3'
 
@@ -35,7 +35,7 @@ __license__ = 'LGPLv3'
 try:
     from psutil import __version__ as psutil_version
 except ImportError:
-    print('PSutil library not found. Glances cannot start.')
+    print('psutil library not found. Glances cannot start.')
     sys.exit(1)
 
 # Import Glances libs
@@ -51,15 +51,15 @@ except locale.Error:
     print("Warning: Unable to set locale. Expect encoding problems.")
 
 # Check Python version
-if sys.version_info < (2, 7) or (3, 0) <= sys.version_info < (3, 3):
-    print('Glances requires at least Python 2.7 or 3.3 to run.')
+if sys.version_info < (2, 7) or (3, 0) <= sys.version_info < (3, 4):
+    print('Glances requires at least Python 2.7 or 3.4 to run.')
     sys.exit(1)
 
-# Check PSutil version
-psutil_min_version = (2, 0, 0)
+# Check psutil version
+psutil_min_version = (5, 3, 0)
 psutil_version_info = tuple([int(num) for num in psutil_version.split('.')])
 if psutil_version_info < psutil_min_version:
-    print('PSutil 2.0 or higher is needed. Glances cannot start.')
+    print('psutil 5.3.0 or higher is needed. Glances cannot start.')
     sys.exit(1)
 
 
@@ -70,15 +70,21 @@ def __signal_handler(signal, frame):
 
 def end():
     """Stop Glances."""
-    mode.end()
-    logger.info("Glances stopped with CTRL-C")
+    try:
+        mode.end()
+    except NameError:
+        # NameError: name 'mode' is not defined in case of interrupt shortly...
+        # ...after starting the server mode (issue #1175)
+        pass
+
+    logger.info("Glances stopped (keypressed: CTRL-C)")
 
     # The end...
     sys.exit(0)
 
 
 def start(config, args):
-    """Start Glances"""
+    """Start Glances."""
 
     # Load mode
     global mode
@@ -112,9 +118,12 @@ def main():
     Select the mode (standalone, client or server)
     Run it...
     """
-    # Log Glances and PSutil version
+    # Catch the CTRL-C signal
+    signal.signal(signal.SIGINT, __signal_handler)
+
+    # Log Glances and psutil version
     logger.info('Start Glances {}'.format(__version__))
-    logger.info('{} {} and PSutil {} detected'.format(
+    logger.info('{} {} and psutil {} detected'.format(
         platform.python_implementation(),
         platform.python_version(),
         psutil_version))
@@ -126,9 +135,6 @@ def main():
     core = GlancesMain()
     config = core.get_config()
     args = core.get_args()
-
-    # Catch the CTRL-C signal
-    signal.signal(signal.SIGINT, __signal_handler)
 
     # Glances can be ran in standalone, client or server mode
     start(config=config, args=args)

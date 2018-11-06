@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -21,11 +21,10 @@
 
 import operator
 
-from glances.compat import u
+from glances.compat import u, nativestr
 from glances.plugins.glances_plugin import GlancesPlugin
 
 import psutil
-
 
 # SNMP OID
 # The snmpd.conf needs to be edited.
@@ -59,14 +58,12 @@ snmp_oid['esxi'] = snmp_oid['windows']
 
 # Define the history items list
 # All items in this list will be historised if the --enable-history tag is set
-# 'color' define the graph color in #RGB format
 items_history_list = [{'name': 'percent',
                        'description': 'File system usage in percent',
-                       'color': '#00FF00'}]
+                       'y_unit': '%'}]
 
 
 class Plugin(GlancesPlugin):
-
     """Glances file system plugin.
 
     stats is a list
@@ -74,33 +71,28 @@ class Plugin(GlancesPlugin):
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args, items_history_list=items_history_list)
+        super(Plugin, self).__init__(args=args,
+                                     items_history_list=items_history_list,
+                                     stats_init_value=[])
 
         # We want to display the stat in the curse interface
         self.display_curse = True
-
-        # Init the stats
-        self.reset()
 
     def get_key(self):
         """Return the key of the list."""
         return 'mnt_point'
 
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = []
-
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update the FS stats using the input method."""
-        # Reset the list
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         if self.input_method == 'local':
             # Update stats using the standard system lib
 
-            # Grab the stats using the PsUtil disk_partitions
+            # Grab the stats using the psutil disk_partitions
             # If 'all'=False return physical devices only (e.g. hard disks, cd-rom drives, USB keys)
             # and ignore all others (e.g. memory partitions such as /dev/shm)
             try:
@@ -139,7 +131,7 @@ class Plugin(GlancesPlugin):
                     'free': fs_usage.free,
                     'percent': fs_usage.percent,
                     'key': self.get_key()}
-                self.stats.append(fs_current)
+                stats.append(fs_current)
 
         elif self.input_method == 'snmp':
             # Update stats using SNMP
@@ -169,7 +161,7 @@ class Plugin(GlancesPlugin):
                         'used': used,
                         'percent': percent,
                         'key': self.get_key()}
-                    self.stats.append(fs_current)
+                    stats.append(fs_current)
             else:
                 # Default behavior
                 for fs in fs_stat:
@@ -180,7 +172,10 @@ class Plugin(GlancesPlugin):
                         'used': int(fs_stat[fs]['used']) * 1024,
                         'percent': float(fs_stat[fs]['percent']),
                         'key': self.get_key()}
-                    self.stats.append(fs_current)
+                    stats.append(fs_current)
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
@@ -204,16 +199,12 @@ class Plugin(GlancesPlugin):
         if not self.stats or self.is_disable():
             return ret
 
-        # Max size for the fsname name
-        if max_width is not None and max_width >= 23:
-            # Interface size name = max_width - space for interfaces bitrate
-            fsname_max_width = max_width - 14
-        else:
-            fsname_max_width = 9
+        # Max size for the interface name
+        name_max_width = max_width - 12
 
         # Build the string message
         # Header
-        msg = '{:{width}}'.format('FILE SYS', width=fsname_max_width)
+        msg = '{:{width}}'.format('FILE SYS', width=name_max_width)
         ret.append(self.curse_add_line(msg, "TITLE"))
         if args.fs_free_space:
             msg = '{:>7}'.format('Free')
@@ -228,16 +219,17 @@ class Plugin(GlancesPlugin):
             # New line
             ret.append(self.curse_new_line())
             if i['device_name'] == '' or i['device_name'] == 'none':
-                mnt_point = i['mnt_point'][-fsname_max_width + 1:]
-            elif len(i['mnt_point']) + len(i['device_name'].split('/')[-1]) <= fsname_max_width - 3:
+                mnt_point = i['mnt_point'][-name_max_width + 1:]
+            elif len(i['mnt_point']) + len(i['device_name'].split('/')[-1]) <= name_max_width - 3:
                 # If possible concatenate mode info... Glances touch inside :)
                 mnt_point = i['mnt_point'] + ' (' + i['device_name'].split('/')[-1] + ')'
-            elif len(i['mnt_point']) > fsname_max_width:
+            elif len(i['mnt_point']) > name_max_width:
                 # Cut mount point name if it is too long
-                mnt_point = '_' + i['mnt_point'][-fsname_max_width + 1:]
+                mnt_point = '_' + i['mnt_point'][-name_max_width + 1:]
             else:
                 mnt_point = i['mnt_point']
-            msg = '{:{width}}'.format(mnt_point, width=fsname_max_width)
+            msg = '{:{width}}'.format(nativestr(mnt_point),
+                                      width=name_max_width)
             ret.append(self.curse_add_line(msg))
             if args.fs_free_space:
                 msg = '{:>7}'.format(self.auto_unit(i['free']))

@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -23,7 +23,7 @@ from datetime import datetime
 
 from glances.logs import glances_logs
 from glances.thresholds import glances_thresholds
-from glances.logger import logger
+# from glances.logger import logger
 from glances.plugins.glances_plugin import GlancesPlugin
 
 # Static decision tree for the global alert message
@@ -61,8 +61,10 @@ tree = [{'msg': 'No warning or critical alert detected',
 
 
 def global_message():
-    """Parse the decision tree and return the message
-    corresponding to the current threasholds values"""
+    """Parse the decision tree and return the message.
+
+    Note: message corresponding to the current threasholds values
+    """
     # Compute the weight for each item in the tree
     current_thresholds = glances_thresholds.get()
     for i in tree:
@@ -76,7 +78,6 @@ def global_message():
 
 
 class Plugin(GlancesPlugin):
-
     """Glances alert plugin.
 
     Only for display.
@@ -84,20 +85,14 @@ class Plugin(GlancesPlugin):
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args)
+        super(Plugin, self).__init__(args=args,
+                                     stats_init_value=[])
 
         # We want to display the stat in the curse interface
         self.display_curse = True
 
         # Set the message position
         self.align = 'bottom'
-
-        # Init the stats
-        self.reset()
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = []
 
     def update(self):
         """Nothing to do here. Just return the global glances_log."""
@@ -108,7 +103,7 @@ class Plugin(GlancesPlugin):
         # !!! Call directly in the msg_curse function
         # global_message()
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the dict to display in the curse interface."""
         # Init the return message
         ret = []

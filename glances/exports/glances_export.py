@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -92,10 +92,10 @@ class GlancesExport(object):
             for opt in mandatories:
                 setattr(self, opt, self.config.get_value(section, opt))
         except NoSectionError:
-            logger.critical("No {} configuration found".format(section))
+            logger.error("No {} configuration found".format(section))
             return False
         except NoOptionError as e:
-            logger.critical("Error in the {} configuration ({})".format(section, e))
+            logger.error("Error in the {} configuration ({})".format(section, e))
             return False
 
         # Load options
@@ -146,7 +146,7 @@ class GlancesExport(object):
         The method builds two lists: names and values
         and calls the export method to export the stats.
 
-        Be aware that CSV export overwrite this class and use a specific one.
+        Note: this class can be overwrite (for example in CSV and Graph).
         """
         if not self.export_enable:
             return False

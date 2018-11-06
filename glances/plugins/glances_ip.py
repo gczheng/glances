@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -23,36 +23,31 @@ import threading
 from json import loads
 
 from glances.compat import iterkeys, urlopen, queue
-from glances.globals import BSD
 from glances.logger import logger
 from glances.timer import Timer
 from glances.plugins.glances_plugin import GlancesPlugin
 
-# XXX *BSDs: Segmentation fault (core dumped)
-# -- https://bitbucket.org/al45tair/netifaces/issues/15
-# Also used in the ports_list script
-if not BSD:
-    try:
-        import netifaces
-        netifaces_tag = True
-    except ImportError:
-        netifaces_tag = False
+# Import plugin specific dependency
+try:
+    import netifaces
+except ImportError as e:
+    import_error_tag = True
+    logger.warning("Missing Python Lib ({}), IP plugin is disabled".format(e))
 else:
-    netifaces_tag = False
+    import_error_tag = False
 
 # List of online services to retreive public IP address
 # List of tuple (url, json, key)
 # - url: URL of the Web site
 # - json: service return a JSON (True) or string (False)
 # - key: key of the IP addresse in the JSON structure
-urls = [('http://ip.42.pl/raw', False, None),
-        ('http://httpbin.org/ip', True, 'origin'),
-        ('http://jsonip.com', True, 'ip'),
+urls = [('https://ip.42.pl/raw', False, None),
+        ('https://httpbin.org/ip', True, 'origin'),
+        ('https://jsonip.com', True, 'ip'),
         ('https://api.ipify.org/?format=json', True, 'ip')]
 
 
 class Plugin(GlancesPlugin):
-
     """Glances IP Plugin.
 
     stats is a dict
@@ -65,15 +60,9 @@ class Plugin(GlancesPlugin):
         # We want to display the stat in the curse interface
         self.display_curse = True
 
-        # Get the public IP address once
-        self.public_address = PublicIpAddress().get()
-
-        # Init the stats
-        self.reset()
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = {}
+        # Get the public IP address once (not for each refresh)
+        if not self.is_disable():
+            self.public_address = PublicIpAddress().get()
 
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
@@ -82,10 +71,10 @@ class Plugin(GlancesPlugin):
 
         Stats is dict
         """
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
-        if self.input_method == 'local' and netifaces_tag:
+        if self.input_method == 'local' and not import_error_tag:
             # Update stats using the netifaces lib
             try:
                 default_gw = netifaces.gateways()['default'][netifaces.AF_INET]
@@ -93,17 +82,19 @@ class Plugin(GlancesPlugin):
                 logger.debug("Cannot grab the default gateway ({})".format(e))
             else:
                 try:
-                    self.stats['address'] = netifaces.ifaddresses(default_gw[1])[netifaces.AF_INET][0]['addr']
-                    self.stats['mask'] = netifaces.ifaddresses(default_gw[1])[netifaces.AF_INET][0]['netmask']
-                    self.stats['mask_cidr'] = self.ip_to_cidr(self.stats['mask'])
-                    self.stats['gateway'] = netifaces.gateways()['default'][netifaces.AF_INET][0]
-                    # !!! SHOULD be done once, not on each refresh
-                    self.stats['public_address'] = self.public_address
+                    stats['address'] = netifaces.ifaddresses(default_gw[1])[netifaces.AF_INET][0]['addr']
+                    stats['mask'] = netifaces.ifaddresses(default_gw[1])[netifaces.AF_INET][0]['netmask']
+                    stats['mask_cidr'] = self.ip_to_cidr(stats['mask'])
+                    stats['gateway'] = netifaces.gateways()['default'][netifaces.AF_INET][0]
+                    stats['public_address'] = self.public_address
                 except (KeyError, AttributeError) as e:
                     logger.debug("Cannot grab IP information: {}".format(e))
         elif self.input_method == 'snmp':
             # Not implemented yet
             pass
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
@@ -117,7 +108,7 @@ class Plugin(GlancesPlugin):
         for key in iterkeys(self.stats):
             self.views[key]['optional'] = True
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the dict to display in the curse interface."""
         # Init the return message
         ret = []
@@ -131,8 +122,9 @@ class Plugin(GlancesPlugin):
         ret.append(self.curse_add_line(msg))
         msg = 'IP '
         ret.append(self.curse_add_line(msg, 'TITLE'))
-        msg = '{}'.format(self.stats['address'])
-        ret.append(self.curse_add_line(msg))
+        if 'address' in self.stats:
+            msg = '{}'.format(self.stats['address'])
+            ret.append(self.curse_add_line(msg))
         if 'mask_cidr' in self.stats:
             # VPN with no internet access (issue #842)
             msg = '/{}'.format(self.stats['mask_cidr'])
@@ -159,13 +151,14 @@ class Plugin(GlancesPlugin):
 
 
 class PublicIpAddress(object):
-    """Get public IP address from online services"""
+    """Get public IP address from online services."""
 
     def __init__(self, timeout=2):
+        """Init the class."""
         self.timeout = timeout
 
     def get(self):
-        """Get the first public IP address returned by one of the online services"""
+        """Get the first public IP address returned by one of the online services."""
         q = queue.Queue()
 
         for u, j, k in urls:
@@ -182,7 +175,7 @@ class PublicIpAddress(object):
         return ip
 
     def _get_ip_public(self, queue_target, url, json=False, key=None):
-        """Request the url service and put the result in the queue_target"""
+        """Request the url service and put the result in the queue_target."""
         try:
             response = urlopen(url, timeout=self.timeout).read().decode('utf-8')
         except Exception as e:

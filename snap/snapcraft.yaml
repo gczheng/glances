@@ -1,5 +1,5 @@
 name: glances
-version: '2.11.1'
+version: '3.0'
 summary: Glances an Eye on your system. A top/htop alternative.
 description: |
   Glances is a cross-platform monitoring tool which aims to present
@@ -15,8 +15,13 @@ apps:
     command: bin/glances
     plugs:
       - network
-      - mount-observe
       - system-observe
+      - mount-observe
+      - hardware-observe
+      - log-observe
+      - network-observe
+      - physical-memory-observe
+      - upower-observe
 
 parts:
   glances:

@@ -1,17 +1,8 @@
-'use strict';
 
-function GlancesPluginDockerController($scope, GlancesStats) {
+export default function GlancesPluginDockerController($scope, GlancesStats) {
     var vm = this;
     vm.containers = [];
     vm.version = null;
-
-    vm.$onInit = function () {
-        loadData(GlancesStats.getData());
-    };
-
-    $scope.$on('data_refreshed', function (event, data) {
-        loadData(data);
-    });
 
     var loadData = function (data) {
         var stats = data.stats['docker'];
@@ -24,7 +15,7 @@ function GlancesPluginDockerController($scope, GlancesStats) {
         vm.containers = stats['containers'].map(function(containerData) {
             return {
                 'id': containerData.Id,
-                'name': containerData.Names[0].split('/').splice(-1)[0],
+                'name': containerData.name,
                 'status': containerData.Status,
                 'cpu': containerData.cpu.total,
                 'memory': containerData.memory.usage != undefined ? containerData.memory.usage : '?',
@@ -41,4 +32,12 @@ function GlancesPluginDockerController($scope, GlancesStats) {
 
         vm.version = stats['version']['Version'];
     }
+
+    vm.$onInit = function () {
+        loadData(GlancesStats.getData());
+    };
+
+    $scope.$on('data_refreshed', function (event, data) {
+        loadData(data);
+    });
 }

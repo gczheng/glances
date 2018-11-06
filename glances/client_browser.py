@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -24,11 +24,11 @@ import socket
 import threading
 
 from glances.compat import Fault, ProtocolError, ServerProxy
-from glances.autodiscover import GlancesAutoDiscoverServer
 from glances.client import GlancesClient, GlancesClientTransport
 from glances.logger import logger, LOG_FILENAME
 from glances.password_list import GlancesPasswordList as GlancesPassword
 from glances.static_list import GlancesStaticServer
+from glances.autodiscover import GlancesAutoDiscoverServer
 from glances.outputs.glances_curses_browser import GlancesCursesBrowser
 
 
@@ -151,7 +151,7 @@ class GlancesClientBrowser(object):
         Connect and display the given server
         """
         # Display the Glances client for the selected server
-        logger.debug("Selected server: {}".format(server))
+        logger.debug("Selected server {}".format(server))
 
         # Connection can take time
         # Display a popup

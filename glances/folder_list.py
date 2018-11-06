@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -21,7 +21,7 @@
 
 import os
 
-from glances.compat import range
+from glances.compat import range, nativestr
 from glances.logger import logger
 
 # Use the built-in version of scandir/walk if possible, otherwise
@@ -84,6 +84,8 @@ class FolderList(object):
             value['path'] = self.config.get_value(section, key + 'path')
             if value['path'] is None:
                 continue
+            else:
+                value['path'] = nativestr(value['path'])
 
             # Optional conf keys
             for i in ['careful', 'warning', 'critical']:

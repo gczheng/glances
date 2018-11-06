@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -91,8 +91,11 @@ class GlancesActions(object):
             else:
                 cmd_full = cmd
             # Execute the action
-            logger.info("Action triggered for {} ({}): {}".format(stat_name, criticity, cmd_full))
-            logger.debug("Stats value for the trigger: {}".format(mustache_dict))
+            logger.info("Action triggered for {} ({}): {}".format(stat_name,
+                                                                  criticity,
+                                                                  cmd_full))
+            logger.debug("Stats value for the trigger: {}".format(
+                mustache_dict))
             try:
                 Popen(cmd_full, shell=True)
             except OSError as e:

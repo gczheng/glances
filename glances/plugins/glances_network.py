@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -35,20 +35,15 @@ snmp_oid = {'default': {'interface_name': '1.3.6.1.2.1.2.2.1.2',
                         'cumulative_tx': '1.3.6.1.2.1.2.2.1.16'}}
 
 # Define the history items list
-# All items in this list will be historised if the --enable-history tag is set
-# 'color' define the graph color in #RGB format
 items_history_list = [{'name': 'rx',
                        'description': 'Download rate per second',
-                       'color': '#00FF00',
                        'y_unit': 'bit/s'},
                       {'name': 'tx',
                        'description': 'Upload rate per second',
-                       'color': '#FF0000',
                        'y_unit': 'bit/s'}]
 
 
 class Plugin(GlancesPlugin):
-
     """Glances network plugin.
 
     stats is a list
@@ -56,21 +51,16 @@ class Plugin(GlancesPlugin):
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args, items_history_list=items_history_list)
+        super(Plugin, self).__init__(args=args,
+                                     items_history_list=items_history_list,
+                                     stats_init_value=[])
 
         # We want to display the stat in the curse interface
         self.display_curse = True
 
-        # Init the stats
-        self.reset()
-
     def get_key(self):
         """Return the key of the list."""
         return 'interface_name'
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = []
 
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
@@ -79,25 +69,26 @@ class Plugin(GlancesPlugin):
 
         Stats is a list of dict (one dict per interface)
         """
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         if self.input_method == 'local':
             # Update stats using the standard system lib
 
-            # Grab network interface stat using the PsUtil net_io_counter method
+            # Grab network interface stat using the psutil net_io_counter method
             try:
                 netiocounters = psutil.net_io_counters(pernic=True)
             except UnicodeDecodeError:
                 return self.stats
 
-            # New in PsUtil 3.0
+            # New in psutil 3.0.0
             # - import the interface's status (issue #765)
             # - import the interface's speed (issue #718)
             netstatus = {}
             try:
                 netstatus = psutil.net_if_stats()
-            except (AttributeError, OSError):
+            except OSError:
+                # see psutil #797/glances #1106
                 pass
 
             # Previous network interface stats are stored in the network_old variable
@@ -138,22 +129,15 @@ class Plugin(GlancesPlugin):
                     except KeyError:
                         continue
                     else:
-                        # Optional stats (only compliant with PsUtil 3.0+)
                         # Interface status
-                        try:
-                            netstat['is_up'] = netstatus[net].isup
-                        except (KeyError, AttributeError):
-                            pass
+                        netstat['is_up'] = netstatus[net].isup
                         # Interface speed in Mbps, convert it to bps
-                        # Can be always 0 on some OS
-                        try:
-                            netstat['speed'] = netstatus[net].speed * 1048576
-                        except (KeyError, AttributeError):
-                            pass
+                        # Can be always 0 on some OSes
+                        netstat['speed'] = netstatus[net].speed * 1048576
 
                         # Finaly, set the key
                         netstat['key'] = self.get_key()
-                        self.stats.append(netstat)
+                        stats.append(netstat)
 
                 # Save stats to compute next bitrate
                 self.network_old = network_new
@@ -218,10 +202,13 @@ class Plugin(GlancesPlugin):
                         continue
                     else:
                         netstat['key'] = self.get_key()
-                        self.stats.append(netstat)
+                        stats.append(netstat)
 
                 # Save stats to compute next bitrate
                 self.network_old = network_new
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
@@ -264,15 +251,10 @@ class Plugin(GlancesPlugin):
             return ret
 
         # Max size for the interface name
-        if max_width is not None and max_width >= 23:
-            # Interface size name = max_width - space for interfaces bitrate
-            ifname_max_width = max_width - 14
-        else:
-            ifname_max_width = 9
+        name_max_width = max_width - 12
 
-        # Build the string message
         # Header
-        msg = '{:{width}}'.format('NETWORK', width=ifname_max_width)
+        msg = '{:{width}}'.format('NETWORK', width=name_max_width)
         ret.append(self.curse_add_line(msg, "TITLE"))
         if args.network_cumul:
             # Cumulative stats
@@ -298,7 +280,7 @@ class Plugin(GlancesPlugin):
                 msg = '{:>7}'.format('Tx/s')
                 ret.append(self.curse_add_line(msg))
         # Interface list (sorted by name)
-        for i in sorted(self.stats, key=operator.itemgetter(self.get_key())):
+        for i in self.sorted_stats():
             # Do not display interface in down state (issue #765)
             if ('is_up' in i) and (i['is_up'] is False):
                 continue
@@ -308,9 +290,9 @@ class Plugin(GlancesPlugin):
             ifname = self.has_alias(i['interface_name'])
             if ifname is None:
                 ifname = ifrealname
-            if len(ifname) > ifname_max_width:
+            if len(ifname) > name_max_width:
                 # Cut interface name if it is too long
-                ifname = '_' + ifname[-ifname_max_width + 1:]
+                ifname = '_' + ifname[-name_max_width + 1:]
 
             if args.byte:
                 # Bytes per second (for dummy)
@@ -334,7 +316,7 @@ class Plugin(GlancesPlugin):
 
             # New line
             ret.append(self.curse_new_line())
-            msg = '{:{width}}'.format(ifname, width=ifname_max_width)
+            msg = '{:{width}}'.format(ifname, width=name_max_width)
             ret.append(self.curse_add_line(msg))
             if args.network_sum:
                 msg = '{:>14}'.format(sx)

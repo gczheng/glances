@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -109,7 +109,7 @@ class GlancesLogs(object):
         If 'item' is not a 'new one', update the existing item.
         If event < peak_time the the alert is not setoff.
         """
-        proc_list = proc_list or glances_processes.getalllist()
+        proc_list = proc_list or glances_processes.getlist()
 
         # Add or update the log
         item_index = self.__itemexist__(item_type)

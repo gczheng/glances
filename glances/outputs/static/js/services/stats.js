@@ -1,4 +1,7 @@
-glancesApp.service('GlancesStats', function ($http, $q, $rootScope, $timeout, GlancesPluginHelper, REFRESH_TIME, CONFIG, ARGUMENTS) {
+
+import angular from "angular";
+
+function GlancesStats ($http, $q, $rootScope, $timeout, GlancesPluginHelper, REFRESH_TIME, CONFIG, ARGUMENTS) {
 
     var _data = false;
 
@@ -31,13 +34,13 @@ glancesApp.service('GlancesStats', function ($http, $q, $rootScope, $timeout, Gl
         };
 
         // load limits to init GlancePlugin helper
-        $http.get('api/2/all/limits').then(function (response) {
+        $http.get('api/3/all/limits').then(function (response) {
             GlancesPluginHelper.setLimits(response.data);
         });
-        $http.get('api/2/config').then(function (response) {
+        $http.get('api/3/config').then(function (response) {
             angular.extend(CONFIG, response.data);
         });
-        $http.get('api/2/args').then(function (response) {
+        $http.get('api/3/args').then(function (response) {
             angular.extend(ARGUMENTS, response.data);
         });
 
@@ -55,14 +58,16 @@ glancesApp.service('GlancesStats', function ($http, $q, $rootScope, $timeout, Gl
     }
 
     var getAllStats = function () {
-        return $http.get('api/2/all').then(function (response) {
+        return $http.get('api/3/all').then(function (response) {
             return response.data;
         });
     };
 
     var getAllViews = function () {
-        return $http.get('api/2/all/views').then(function (response) {
+        return $http.get('api/3/all/views').then(function (response) {
             return response.data;
         });
     };
-});
+}
+
+export default angular.module("glancesApp").service("GlancesStats", GlancesStats);

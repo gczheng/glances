@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -19,8 +19,7 @@
 
 """Disk I/O plugin."""
 
-import operator
-
+from glances.compat import nativestr
 from glances.timer import getTimeSinceLastUpdate
 from glances.plugins.glances_plugin import GlancesPlugin
 
@@ -28,20 +27,15 @@ import psutil
 
 
 # Define the history items list
-# All items in this list will be historised if the --enable-history tag is set
-# 'color' define the graph color in #RGB format
 items_history_list = [{'name': 'read_bytes',
                        'description': 'Bytes read per second',
-                       'color': '#00FF00',
                        'y_unit': 'B/s'},
                       {'name': 'write_bytes',
                        'description': 'Bytes write per second',
-                       'color': '#FF0000',
                        'y_unit': 'B/s'}]
 
 
 class Plugin(GlancesPlugin):
-
     """Glances disks I/O plugin.
 
     stats is a list
@@ -49,32 +43,27 @@ class Plugin(GlancesPlugin):
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args, items_history_list=items_history_list)
+        super(Plugin, self).__init__(args=args,
+                                     items_history_list=items_history_list,
+                                     stats_init_value=[])
 
         # We want to display the stat in the curse interface
         self.display_curse = True
-
-        # Init the stats
-        self.reset()
 
     def get_key(self):
         """Return the key of the list."""
         return 'disk_name'
 
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = []
-
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update disk I/O stats using the input method."""
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         if self.input_method == 'local':
             # Update stats using the standard system lib
-            # Grab the stat using the PsUtil disk_io_counters method
+            # Grab the stat using the psutil disk_io_counters method
             # read_count: number of reads
             # write_count: number of writes
             # read_bytes: number of bytes read
@@ -84,7 +73,7 @@ class Plugin(GlancesPlugin):
             try:
                 diskiocounters = psutil.disk_io_counters(perdisk=True)
             except Exception:
-                return self.stats
+                return stats
 
             # Previous disk IO stats are stored in the diskio_old variable
             if not hasattr(self, 'diskio_old'):
@@ -133,7 +122,7 @@ class Plugin(GlancesPlugin):
                         continue
                     else:
                         diskstat['key'] = self.get_key()
-                        self.stats.append(diskstat)
+                        stats.append(diskstat)
 
                 # Save stats to compute next bitrate
                 self.diskio_old = diskio_new
@@ -141,6 +130,9 @@ class Plugin(GlancesPlugin):
             # Update stats using SNMP
             # No standard way for the moment...
             pass
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
@@ -158,7 +150,7 @@ class Plugin(GlancesPlugin):
             self.views[i[self.get_key()]]['write_bytes']['decoration'] = self.get_alert(int(i['write_bytes'] // i['time_since_update']),
                                                                                         header=disk_real_name + '_tx')
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the dict to display in the curse interface."""
         # Init the return message
         ret = []
@@ -167,9 +159,11 @@ class Plugin(GlancesPlugin):
         if not self.stats or self.is_disable():
             return ret
 
-        # Build the string message
+        # Max size for the interface name
+        name_max_width = max_width - 12
+
         # Header
-        msg = '{:9}'.format('DISK I/O')
+        msg = '{:{width}}'.format('DISK I/O', width=name_max_width)
         ret.append(self.curse_add_line(msg, "TITLE"))
         if args.diskio_iops:
             msg = '{:>7}'.format('IOR/s')
@@ -182,7 +176,7 @@ class Plugin(GlancesPlugin):
             msg = '{:>7}'.format('W/s')
             ret.append(self.curse_add_line(msg))
         # Disk list (sorted by name)
-        for i in sorted(self.stats, key=operator.itemgetter(self.get_key())):
+        for i in self.sorted_stats():
             # Is there an alias for the disk name ?
             disk_real_name = i['disk_name']
             disk_name = self.has_alias(i['disk_name'])
@@ -190,10 +184,11 @@ class Plugin(GlancesPlugin):
                 disk_name = disk_real_name
             # New line
             ret.append(self.curse_new_line())
-            if len(disk_name) > 9:
+            if len(disk_name) > name_max_width:
                 # Cut disk name if it is too long
-                disk_name = '_' + disk_name[-8:]
-            msg = '{:9}'.format(disk_name)
+                disk_name = '_' + disk_name[-name_max_width:]
+            msg = '{:{width}}'.format(nativestr(disk_name),
+                                      width=name_max_width)
             ret.append(self.curse_add_line(msg))
             if args.diskio_iops:
                 # count

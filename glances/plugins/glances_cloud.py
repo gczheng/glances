@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -23,22 +23,24 @@ Supported Cloud API:
 - AWS EC2 (class ThreadAwsEc2Grabber, see bellow)
 """
 
-try:
-    import requests
-except ImportError:
-    cloud_tag = False
-else:
-    cloud_tag = True
-
 import threading
 
 from glances.compat import iteritems, to_ascii
 from glances.plugins.glances_plugin import GlancesPlugin
 from glances.logger import logger
 
+# Import plugin specific dependency
+try:
+    import requests
+except ImportError as e:
+    import_error_tag = True
+    # Display debu message if import KeyError
+    logger.warning("Missing Python Lib ({}), Cloud plugin is disabled".format(e))
+else:
+    import_error_tag = False
+
 
 class Plugin(GlancesPlugin):
-
     """Glances' cloud plugin.
 
     The goal of this plugin is to retreive additional information
@@ -65,12 +67,8 @@ class Plugin(GlancesPlugin):
         # Run the thread
         self.aws_ec2. start()
 
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = {}
-
     def exit(self):
-        """Overwrite the exit method to close threads"""
+        """Overwrite the exit method to close threads."""
         self.aws_ec2.stop()
         # Call the father class
         super(Plugin, self).exit()
@@ -82,24 +80,28 @@ class Plugin(GlancesPlugin):
 
         Return the stats (dict)
         """
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         # Requests lib is needed to get stats from the Cloud API
-        if not cloud_tag:
-            return self.stats
+        if import_error_tag:
+            return stats
 
         # Update the stats
         if self.input_method == 'local':
-            self.stats = self.aws_ec2.stats
-            # self.stats = {'ami-id': 'ami-id',
-            #                         'instance-id': 'instance-id',
-            #                         'instance-type': 'instance-type',
-            #                         'region': 'placement/availability-zone'}
+            # Example:
+            # stats = {'ami-id': 'ami-id',
+            #                    'instance-id': 'instance-id',
+            #                    'instance-type': 'instance-type',
+            #                    'region': 'placement/availability-zone'}
+            stats = self.aws_ec2.stats
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the string to display in the curse interface."""
         # Init the return message
         ret = []
@@ -117,7 +119,7 @@ class Plugin(GlancesPlugin):
             ret.append(self.curse_add_line(msg))
 
         # Return the message with decoration
-        logger.info(ret)
+        # logger.info(ret)
         return ret
 
 
@@ -137,7 +139,7 @@ class ThreadAwsEc2Grabber(threading.Thread):
                             'region': 'placement/availability-zone'}
 
     def __init__(self):
-        """Init the class"""
+        """Init the class."""
         logger.debug("cloud plugin - Create thread for AWS EC2")
         super(ThreadAwsEc2Grabber, self).__init__()
         # Event needed to stop properly the thread
@@ -146,11 +148,11 @@ class ThreadAwsEc2Grabber(threading.Thread):
         self._stats = {}
 
     def run(self):
-        """Function called to grab stats.
-        Infinite loop, should be stopped by calling the stop() method"""
+        """Grab plugin's stats.
 
-        if not cloud_tag:
-            logger.debug("cloud plugin - Requests lib is not installed")
+        Infinite loop, should be stopped by calling the stop() method
+        """
+        if import_error_tag:
             self.stop()
             return False
 
@@ -170,19 +172,19 @@ class ThreadAwsEc2Grabber(threading.Thread):
 
     @property
     def stats(self):
-        """Stats getter"""
+        """Stats getter."""
         return self._stats
 
     @stats.setter
     def stats(self, value):
-        """Stats setter"""
+        """Stats setter."""
         self._stats = value
 
     def stop(self, timeout=None):
-        """Stop the thread"""
+        """Stop the thread."""
         logger.debug("cloud plugin - Close thread for AWS EC2")
         self._stopper.set()
 
     def stopped(self):
-        """Return True is the thread is stopped"""
+        """Return True is the thread is stopped."""
         return self._stopper.isSet()

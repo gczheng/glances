@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -17,13 +17,15 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+"""Now (current date) plugin."""
+
+from time import tzname
 from datetime import datetime
 
 from glances.plugins.glances_plugin import GlancesPlugin
 
 
 class Plugin(GlancesPlugin):
-
     """Plugin to get the current date/time.
 
     stats is (string)
@@ -47,10 +49,12 @@ class Plugin(GlancesPlugin):
         """Update current date/time."""
         # Had to convert it to string because datetime is not JSON serializable
         self.stats = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # Add the time zone (issue#1249)
+        self.stats += ' {}'.format(tzname[0])
 
         return self.stats
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the string to display in the curse interface."""
         # Init the return message
         ret = []

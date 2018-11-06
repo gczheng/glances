@@ -20,6 +20,9 @@ Glances - An eye on your system
 .. image:: https://img.shields.io/scrutinizer/g/nicolargo/glances.svg
     :target: https://scrutinizer-ci.com/g/nicolargo/glances/
 
+.. image:: https://app.fossa.io/api/projects/git%2Bgithub.com%2Fnicolargo%2Fglances.svg?type=shield
+    :target: https://app.fossa.io/projects/git%2Bgithub.com%2Fnicolargo%2Fglances?ref=badge_shield
+
 .. image:: https://img.shields.io/badge/Donate-PayPal-green.svg
     :target: https://www.paypal.me/nicolargo
 
@@ -29,9 +32,9 @@ Summary
 =======
 
 **Glances** is a cross-platform monitoring tool which aims to present a
-maximum of information in a minimum of space through a curses or Web
-based interface. It can adapt dynamically the displayed information
-depending on the user interface size.
+large amount of monitoring information through a curses or Web
+based interface. The information dynamically adapts depending on the
+size of the user interface.
 
 .. image:: https://raw.githubusercontent.com/nicolargo/glances/develop/docs/_static/glances-summary.png
 
@@ -48,8 +51,8 @@ add new plugins or exports modules.
 Requirements
 ============
 
-- ``python 2.7,>=3.3``
-- ``psutil>=2.0.0`` (better with latest version)
+- ``python 2.7,>=3.4``
+- ``psutil>=5.3.0`` (better with latest version)
 
 Optional dependencies:
 
@@ -62,18 +65,18 @@ Optional dependencies:
 - ``hddtemp`` (for HDD temperature monitoring support) [Linux-only]
 - ``influxdb`` (for the InfluxDB export module)
 - ``kafka-python`` (for the Kafka export module)
-- ``matplotlib`` (for graphical/chart support)
 - ``netifaces`` (for the IP plugin)
 - ``nvidia-ml-py3`` (for the GPU plugin)
 - ``pika`` (for the RabbitMQ/ActiveMQ export module)
 - ``potsdb`` (for the OpenTSDB export module)
 - ``prometheus_client`` (for the Prometheus export module)
 - ``py-cpuinfo`` (for the Quicklook CPU info module)
+- ``pygal`` (for the graph export module)
 - ``pymdstat`` (for RAID support) [Linux-only]
 - ``pysnmp`` (for SNMP support)
 - ``pystache`` (for the action script feature)
 - ``pyzmq`` (for the ZeroMQ export module)
-- ``requests`` (for the Ports, Cloud plugins and Restful export module)
+- ``requests`` (for the Ports, Cloud plugins and RESTful export module)
 - ``scandir`` (for the Folders plugin) [Only for Python < 3.5]
 - ``statsd`` (for the StatsD export module)
 - ``wifi`` (for the wifi plugin) [Linux-only]
@@ -81,24 +84,24 @@ Optional dependencies:
 
 *Note for Python 2.6 users*
 
-Since version 2.7, Glances no longer support Python 2.6. Please upgrade
-to at least Python 2.7/3.3+ or downgrade to Glances 2.6.2 (latest version
+Glances no longer supports Python 2.6. Please upgrade
+to a minimum Python version of 2.7/3.4+ or downgrade to Glances 2.6.2 (last version
 with Python 2.6 support).
 
 *Note for CentOS Linux 6 and 7 users*
 
-Python 2.7, 3.3 and 3.4 are now available via SCLs. See:
+Python 2.7 and 3.4 are now available via SCL repositories. See:
 https://lists.centos.org/pipermail/centos-announce/2015-December/021555.html.
 
 Installation
 ============
 
-Several method to test/install Glances on your system. Choose your weapon !
+There are several methods to test/install Glances on your system. Choose your weapon!
 
 Glances Auto Install script: the total way
 ------------------------------------------
 
-To install both dependencies and latest Glances production ready version
+To install both dependencies and the latest Glances production ready version
 (aka *master* branch), just enter the following command line:
 
 .. code-block:: console
@@ -111,13 +114,13 @@ or
 
     wget -O- https://bit.ly/glances | /bin/bash
 
-*Note*: Only supported on some GNU/Linux distributions. If you want to
+*Note*: This is only supported on some GNU/Linux distributions. If you want to
 support other distributions, please contribute to `glancesautoinstall`_.
 
 PyPI: The simple way
 --------------------
 
-Glances is on ``PyPI``. By using PyPI, you are sure to have the latest
+Glances is on ``PyPI``. By using PyPI, you will be using the latest
 stable version.
 
 To install, simply use ``pip``:
@@ -139,7 +142,7 @@ features (like the Web interface, exports modules...):
 
 .. code-block:: console
 
-    pip install glances[action,browser,cloud,cpuinfo,chart,docker,export,folders,gpu,ip,raid,snmp,web,wifi]
+    pip install 'glances[action,browser,cloud,cpuinfo,chart,docker,export,folders,gpu,ip,raid,snmp,web,wifi]'
 
 To upgrade Glances to the latest version:
 
@@ -158,9 +161,9 @@ If you need to install Glances in a specific user location, use:
 Docker: the funny way
 ---------------------
 
-A Glances container is available. It will include the latest development
-HEAD version. You can use it to monitor your server and all your others
-containers !
+A Glances container is available. It includes the latest development
+HEAD version. You can use it to monitor your server and all your other
+containers!
 
 Get the Glances container:
 
@@ -204,7 +207,8 @@ GNU/Linux
 
 `Glances` is available on many Linux distributions, so you should be
 able to install it using your favorite package manager. Be aware that
-Glances may not be the latest one using this method.
+when you use this method the operating system package for `Glances`
+may not be the latest version.
 
 FreeBSD
 -------
@@ -245,17 +249,26 @@ Windows
 -------
 
 Install `Python`_ for Windows (Python 2.7.9+ and 3.4+ ship with pip) and
-then just:
+then run the following command:
 
 .. code-block:: console
 
     $ pip install glances
 
+Alternatively, you could clone the repository and install with the following command.
+
+.. code-block:: console
+
+    $ git clone https://github.com/nicolargo/glances.git
+    $ cd glances
+    $ python setup.py install
+
+
 Android
 -------
 
 You need a rooted device and the `Termux`_ application (available on the
-Google Store).
+Google Play Store).
 
 Start Termux on your device and enter:
 
@@ -299,6 +312,11 @@ Puppet
 ------
 
 You can install Glances using ``Puppet``: https://github.com/rverchere/puppet-glances
+
+Ansible
+-------
+
+A Glances ``Ansible`` role is available: https://galaxy.ansible.com/zaxos/glances-ansible-role/
 
 Usage
 =====
@@ -352,7 +370,7 @@ Gateway to other services
 
 Glances can export stats to: ``CSV`` file, ``JSON`` file, ``InfluxDB``, ``Cassandra``, ``CouchDB``,
 ``OpenTSDB``, ``Prometheus``, ``StatsD``, ``ElasticSearch``, ``RabbitMQ/ActiveMQ``,
-``ZeroMQ``, ``Kafka``, ``Riemann`` and ``Restful`` server.
+``ZeroMQ``, ``Kafka``, ``Riemann`` and ``RESTful`` server.
 
 How to contribute ?
 ===================

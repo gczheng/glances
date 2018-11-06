@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -30,7 +30,6 @@ snmp_oid = {'_uptime': '1.3.6.1.2.1.1.3.0'}
 
 
 class Plugin(GlancesPlugin):
-
     """Glances uptime plugin.
 
     stats is date (string)
@@ -48,11 +47,6 @@ class Plugin(GlancesPlugin):
 
         # Init the stats
         self.uptime = datetime.now() - datetime.fromtimestamp(psutil.boot_time())
-        self.reset()
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = {}
 
     def get_export(self):
         """Overwrite the default export method.
@@ -67,27 +61,29 @@ class Plugin(GlancesPlugin):
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update uptime stat using the input method."""
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         if self.input_method == 'local':
             # Update stats using the standard system lib
             self.uptime = datetime.now() - datetime.fromtimestamp(psutil.boot_time())
 
             # Convert uptime to string (because datetime is not JSONifi)
-            self.stats = str(self.uptime).split('.')[0]
+            stats = str(self.uptime).split('.')[0]
         elif self.input_method == 'snmp':
             # Update stats using SNMP
             uptime = self.get_stats_snmp(snmp_oid=snmp_oid)['_uptime']
             try:
                 # In hundredths of seconds
-                self.stats = str(timedelta(seconds=int(uptime) / 100))
+                stats = str(timedelta(seconds=int(uptime) / 100))
             except Exception:
                 pass
 
-        # Return the result
+        # Update the stats
+        self.stats = stats
+
         return self.stats
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the string to display in the curse interface."""
         return [self.curse_add_line('Uptime: {}'.format(self.stats))]

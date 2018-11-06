@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -20,39 +20,61 @@
 """Docker plugin."""
 
 import os
-import re
 import threading
 import time
 
-from glances.compat import iterkeys, itervalues
+from glances.compat import iterkeys, itervalues, nativestr
 from glances.logger import logger
 from glances.timer import getTimeSinceLastUpdate
 from glances.plugins.glances_plugin import GlancesPlugin
-
-from glances.globals import WINDOWS
 
 # Docker-py library (optional and Linux-only)
 # https://github.com/docker/docker-py
 try:
     import docker
-    import requests
 except ImportError as e:
-    logger.debug("Docker library not found (%s). Glances cannot grab Docker info." % e)
-    docker_tag = False
+    import_error_tag = True
+    # Display debu message if import KeyError
+    logger.warning("Missing Python Lib ({}), Docker plugin is disabled".format(e))
 else:
-    docker_tag = True
+    import_error_tag = False
+
+# Define the items history list (list of items to add to history)
+# TODO: For the moment limited to the CPU. Had to change the graph exports
+#       method to display one graph per container.
+# items_history_list = [{'name': 'cpu_percent',
+#                        'description': 'Container CPU consumption in %',
+#                        'y_unit': '%'},
+#                       {'name': 'memory_usage',
+#                        'description': 'Container memory usage in bytes',
+#                        'y_unit': 'B'},
+#                       {'name': 'network_rx',
+#                        'description': 'Container network RX bitrate in bits per second',
+#                        'y_unit': 'bps'},
+#                       {'name': 'network_tx',
+#                        'description': 'Container network TX bitrate in bits per second',
+#                        'y_unit': 'bps'},
+#                       {'name': 'io_r',
+#                        'description': 'Container IO bytes read per second',
+#                        'y_unit': 'Bps'},
+#                       {'name': 'io_w',
+#                        'description': 'Container IO bytes write per second',
+#                        'y_unit': 'Bps'}]
+items_history_list = [{'name': 'cpu_percent',
+                       'description': 'Container CPU consumption in %',
+                       'y_unit': '%'}]
 
 
 class Plugin(GlancesPlugin):
-
     """Glances Docker plugin.
 
-    stats is a list
+    stats is a dict: {'version': {...}, 'containers': [{}, {}]}
     """
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args)
+        super(Plugin, self).__init__(args=args,
+                                     items_history_list=items_history_list)
 
         # The plgin can be disable using: args.disable_docker
         self.args = args
@@ -61,18 +83,15 @@ class Plugin(GlancesPlugin):
         self.display_curse = True
 
         # Init the Docker API
-        self.docker_client = False
+        self.docker_client = self.connect()
 
         # Dict of thread (to grab stats asynchroniously, one thread is created by container)
         # key: Container Id
         # value: instance of ThreadDockerGrabber
         self.thread_list = {}
 
-        # Init the stats
-        self.reset()
-
     def exit(self):
-        """Overwrite the exit method to close threads"""
+        """Overwrite the exit method to close threads."""
         for t in itervalues(self.thread_list):
             t.stop()
         # Call the father class
@@ -95,108 +114,38 @@ class Plugin(GlancesPlugin):
             logger.debug("docker plugin - Docker export error {}".format(e))
         return ret
 
-    def __connect_old(self, version):
-        """Connect to the Docker server with the 'old school' method"""
-        # Glances is compatible with both API 2.0 and <2.0
-        # (thanks to the @bacondropped patch)
-        if hasattr(docker, 'APIClient'):
-            # Correct issue #1000 for API 2.0
-            init_docker = docker.APIClient
-        elif hasattr(docker, 'Client'):
-            # < API 2.0
-            init_docker = docker.Client
-        else:
-            # Can not found init method (new API version ?)
-            logger.error("docker plugin - Can not found any way to init the Docker API")
-            return None
-        # Init connection to the Docker API
-        try:
-            if WINDOWS:
-                url = 'npipe:////./pipe/docker_engine'
-            else:
-                url = 'unix://var/run/docker.sock'
-            if version is None:
-                ret = init_docker(base_url=url)
-            else:
-                ret = init_docker(base_url=url,
-                                  version=version)
-        except NameError:
-            # docker lib not found
-            return None
-
-        return ret
-
-    def connect(self, version=None):
+    def connect(self):
         """Connect to the Docker server."""
-        if hasattr(docker, 'from_env') and version is not None:
-            # Connect to Docker using the default socket or
-            # the configuration in your environment
-            ret = docker.from_env()
-        else:
-            ret = self.__connect_old(version=version)
-
-        # Check the server connection with the version() method
         try:
-            ret.version()
-        except requests.exceptions.ConnectionError as e:
-            # Connexion error (Docker not detected)
-            # Let this message in debug mode
-            logger.debug("docker plugin - Can't connect to the Docker server (%s)" % e)
-            return None
-        except docker.errors.APIError as e:
-            if version is None:
-                # API error (Version mismatch ?)
-                logger.debug("docker plugin - Docker API error (%s)" % e)
-                # Try the connection with the server version
-                version = re.search('(?:server API version|server)\:\ (.*)\)\".*\)', str(e))
-                if version:
-                    logger.debug("docker plugin - Try connection with Docker API version %s" % version.group(1))
-                    ret = self.connect(version=version.group(1))
-                else:
-                    logger.debug("docker plugin - Can not retreive Docker server version")
-                    ret = None
-            else:
-                # API error
-                logger.error("docker plugin - Docker API error (%s)" % e)
-                ret = None
+            ret = docker.from_env()
         except Exception as e:
-            # Others exceptions...
-            # Connexion error (Docker not detected)
-            logger.error("docker plugin - Can't connect to the Docker server (%s)" % e)
+            logger.error("docker plugin - Can not connect to Docker ({})".format(e))
             ret = None
 
-        # Log an info if Docker plugin is disabled
-        if ret is None:
-            logger.debug("docker plugin - Docker plugin is disable because an error has been detected")
-
         return ret
 
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = {}
+    def _all_tag(self):
+        """Return the all tag of the Glances/Docker configuration file.
+
+        # By default, Glances only display running containers
+        # Set the following key to True to display all containers
+        all=True
+        """
+        all_tag = self.get_conf_value('all')
+        if len(all_tag) == 0:
+            return False
+        else:
+            return all_tag[0].lower() == 'true'
 
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update Docker stats using the input method."""
-        global docker_tag
-
-        # Reset stats
-        self.reset()
-
-        # Get the current Docker API client
-        if not self.docker_client:
-            # First time, try to connect to the server
-            try:
-                self.docker_client = self.connect()
-            except Exception:
-                docker_tag = False
-            else:
-                if self.docker_client is None:
-                    docker_tag = False
+        # Init new stats
+        stats = self.get_init_value()
 
         # The Docker-py lib is mandatory
-        if not docker_tag:
+        if import_error_tag:
             return self.stats
 
         if self.input_method == 'local':
@@ -213,41 +162,33 @@ class Plugin(GlancesPlugin):
             #     "GoVersion": "go1.3.3"
             # }
             try:
-                self.stats['version'] = self.docker_client.version()
+                stats['version'] = self.docker_client.version()
             except Exception as e:
                 # Correct issue#649
                 logger.error("{} plugin - Cannot get Docker version ({})".format(self.plugin_name, e))
                 return self.stats
 
-            # Container globals information
-            # Example: [{u'Status': u'Up 36 seconds',
-            #            u'Created': 1420378904,
-            #            u'Image': u'nginx:1',
-            #            u'Ports': [{u'Type': u'tcp', u'PrivatePort': 443},
-            #                       {u'IP': u'0.0.0.0', u'Type': u'tcp', u'PublicPort': 8080, u'PrivatePort': 80}],
-            #            u'Command': u"nginx -g 'daemon off;'",
-            #            u'Names': [u'/webstack_nginx_1'],
-            #            u'Id': u'b0da859e84eb4019cf1d965b15e9323006e510352c402d2f442ea632d61faaa5'}]
-
             # Update current containers list
             try:
-                self.stats['containers'] = self.docker_client.containers() or []
+                # Issue #1152: Docker module doesn't export details about stopped containers
+                # The Docker/all key of the configuration file should be set to True
+                containers = self.docker_client.containers.list(all=self._all_tag()) or []
             except Exception as e:
                 logger.error("{} plugin - Cannot get containers list ({})".format(self.plugin_name, e))
                 return self.stats
 
             # Start new thread for new container
-            for container in self.stats['containers']:
-                if container['Id'] not in self.thread_list:
+            for container in containers:
+                if container.id not in self.thread_list:
                     # Thread did not exist in the internal dict
                     # Create it and add it to the internal dict
-                    logger.debug("{} plugin - Create thread for container {}".format(self.plugin_name, container['Id'][:12]))
-                    t = ThreadDockerGrabber(self.docker_client, container['Id'])
-                    self.thread_list[container['Id']] = t
+                    logger.debug("{} plugin - Create thread for container {}".format(self.plugin_name, container.id[:12]))
+                    t = ThreadDockerGrabber(container)
+                    self.thread_list[container.id] = t
                     t.start()
 
             # Stop threads for non-existing containers
-            nonexisting_containers = set(iterkeys(self.thread_list)) - set([c['Id'] for c in self.stats['containers']])
+            nonexisting_containers = set(iterkeys(self.thread_list)) - set([c.id for c in containers])
             for container_id in nonexisting_containers:
                 # Stop the thread
                 logger.debug("{} plugin - Stop thread for old container {}".format(self.plugin_name, container_id[:12]))
@@ -256,22 +197,56 @@ class Plugin(GlancesPlugin):
                 del self.thread_list[container_id]
 
             # Get stats for all containers
-            for container in self.stats['containers']:
+            stats['containers'] = []
+            for container in containers:
+                # Init the stats for the current container
+                container_stats = {}
                 # The key is the container name and not the Id
-                container['key'] = self.get_key()
-
-                # Export name (first name in the list, without the /)
-                container['name'] = container['Names'][0][1:]
-
-                container['cpu'] = self.get_docker_cpu(container['Id'], self.thread_list[container['Id']].stats)
-                container['memory'] = self.get_docker_memory(container['Id'], self.thread_list[container['Id']].stats)
-                container['network'] = self.get_docker_network(container['Id'], self.thread_list[container['Id']].stats)
-                container['io'] = self.get_docker_io(container['Id'], self.thread_list[container['Id']].stats)
+                container_stats['key'] = self.get_key()
+                # Export name (first name in the Names list, without the /)
+                container_stats['name'] = nativestr(container.name)
+                # Export global Names (used by the WebUI)
+                container_stats['Names'] = [ nativestr(container.name)]
+                # Container Id
+                container_stats['Id'] = container.id
+                # Container Image
+                container_stats['Image'] = container.image.tags
+                # Global stats (from attrs)
+                container_stats['Status'] = container.attrs['State']['Status']
+                container_stats['Command'] = container.attrs['Config']['Entrypoint']
+                # Standards stats
+                if container_stats['Status'] in ('running', 'paused'):
+                    container_stats['cpu'] = self.get_docker_cpu(container.id, self.thread_list[container.id].stats)
+                    container_stats['cpu_percent'] = container_stats['cpu'].get('total', None)
+                    container_stats['memory'] = self.get_docker_memory(container.id, self.thread_list[container.id].stats)
+                    container_stats['memory_usage'] = container_stats['memory'].get('usage', None)
+                    container_stats['io'] = self.get_docker_io(container.id, self.thread_list[container.id].stats)
+                    container_stats['io_r'] = container_stats['io'].get('ior', None)
+                    container_stats['io_w'] = container_stats['io'].get('iow', None)
+                    container_stats['network'] = self.get_docker_network(container.id, self.thread_list[container.id].stats)
+                    container_stats['network_rx'] = container_stats['network'].get('rx', None)
+                    container_stats['network_tx'] = container_stats['network'].get('tx', None)
+                else:
+                    container_stats['cpu'] = {}
+                    container_stats['cpu_percent'] = None
+                    container_stats['memory'] = {}
+                    container_stats['memory_percent'] = None
+                    container_stats['io'] = {}
+                    container_stats['io_r'] = None
+                    container_stats['io_w'] = None
+                    container_stats['network'] = {}
+                    container_stats['network_rx'] = None
+                    container_stats['network_tx'] = None
+                # Add current container stats to the stats list
+                stats['containers'].append(container_stats)
 
         elif self.input_method == 'snmp':
             # Update stats using SNMP
             # Not available
             pass
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
@@ -454,7 +429,7 @@ class Plugin(GlancesPlugin):
                 iow = [i for i in iocounters['io_service_bytes_recursive'] if i['op'] == 'Write'][0]['value']
                 ior_old = [i for i in self.iocounters_old[container_id]['io_service_bytes_recursive'] if i['op'] == 'Read'][0]['value']
                 iow_old = [i for i in self.iocounters_old[container_id]['io_service_bytes_recursive'] if i['op'] == 'Write'][0]['value']
-            except (IndexError, KeyError) as e:
+            except (TypeError, IndexError, KeyError) as e:
                 # all_stats do not have io information
                 logger.debug("docker plugin - Cannot grab block IO usage for container {} ({})".format(container_id, e))
             else:
@@ -475,8 +450,10 @@ class Plugin(GlancesPlugin):
         return os.sysconf(os.sysconf_names['SC_CLK_TCK'])
 
     def get_stats_action(self):
-        """Return stats for the action
-        Docker will return self.stats['containers']"""
+        """Return stats for the action.
+
+        Docker will return self.stats['containers']
+        """
         return self.stats['containers']
 
     def update_views(self):
@@ -518,13 +495,15 @@ class Plugin(GlancesPlugin):
 
         return True
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the dict to display in the curse interface."""
         # Init the return message
         ret = []
 
         # Only process if stats exist (and non null) and display plugin enable...
-        if not self.stats or len(self.stats['containers']) == 0 or self.is_disable():
+        if not self.stats \
+           or 'containers' not in self.stats or len(self.stats['containers']) == 0 \
+           or self.is_disable():
             return ret
 
         # Build the string message
@@ -538,13 +517,11 @@ class Plugin(GlancesPlugin):
         ret.append(self.curse_new_line())
         # Header
         ret.append(self.curse_new_line())
-        # msg = '{:>14}'.format('Id')
-        # ret.append(self.curse_add_line(msg))
         # Get the maximum containers name (cutted to 20 char max)
         name_max_width = min(20, len(max(self.stats['containers'], key=lambda x: len(x['name']))['name']))
         msg = ' {:{width}}'.format('Name', width=name_max_width)
         ret.append(self.curse_add_line(msg))
-        msg = '{:>26}'.format('Status')
+        msg = '{:>10}'.format('Status')
         ret.append(self.curse_add_line(msg))
         msg = '{:>6}'.format('CPU%')
         ret.append(self.curse_add_line(msg))
@@ -565,27 +542,18 @@ class Plugin(GlancesPlugin):
         # Data
         for container in self.stats['containers']:
             ret.append(self.curse_new_line())
-            # Id
-            # msg = '{:>14}'.format(container['Id'][0:12])
-            # ret.append(self.curse_add_line(msg))
             # Name
-            name = container['name']
-            if len(name) > name_max_width:
-                name = '_' + name[-name_max_width + 1:]
-            else:
-                name = name[:name_max_width]
-            msg = ' {:{width}}'.format(name, width=name_max_width)
-            ret.append(self.curse_add_line(msg))
+            ret.append(self.curse_add_line(self._msg_name(container=container,
+                                                          max_width=name_max_width)))
             # Status
             status = self.container_alert(container['Status'])
-            msg = container['Status'].replace("minute", "min")
-            msg = '{:>26}'.format(msg[0:25])
+            msg = '{:>10}'.format(container['Status'][0:10])
             ret.append(self.curse_add_line(msg, status))
             # CPU
             try:
                 msg = '{:>6.1f}'.format(container['cpu']['total'])
             except KeyError:
-                msg = '{:>6}'.format('?')
+                msg = '{:>6}'.format('_')
             ret.append(self.curse_add_line(msg, self.get_views(item=container['name'],
                                                                key='cpu',
                                                                option='decoration')))
@@ -593,22 +561,23 @@ class Plugin(GlancesPlugin):
             try:
                 msg = '{:>7}'.format(self.auto_unit(container['memory']['usage']))
             except KeyError:
-                msg = '{:>7}'.format('?')
+                msg = '{:>7}'.format('_')
             ret.append(self.curse_add_line(msg, self.get_views(item=container['name'],
                                                                key='mem',
                                                                option='decoration')))
             try:
                 msg = '{:>7}'.format(self.auto_unit(container['memory']['limit']))
             except KeyError:
-                msg = '{:>7}'.format('?')
+                msg = '{:>7}'.format('_')
             ret.append(self.curse_add_line(msg))
             # IO R/W
+            unit = 'B'
             for r in ['ior', 'iow']:
                 try:
-                    value = self.auto_unit(int(container['io'][r] // container['io']['time_since_update'] * 8)) + "b"
+                    value = self.auto_unit(int(container['io'][r] // container['io']['time_since_update'])) + unit
                     msg = '{:>7}'.format(value)
                 except KeyError:
-                    msg = '{:>7}'.format('?')
+                    msg = '{:>7}'.format('_')
                 ret.append(self.curse_add_line(msg))
             # NET RX/TX
             if args.byte:
@@ -624,20 +593,36 @@ class Plugin(GlancesPlugin):
                     value = self.auto_unit(int(container['network'][r] // container['network']['time_since_update'] * to_bit)) + unit
                     msg = '{:>7}'.format(value)
                 except KeyError:
-                    msg = '{:>7}'.format('?')
+                    msg = '{:>7}'.format('_')
                 ret.append(self.curse_add_line(msg))
             # Command
-            msg = ' {}'.format(container['Command'])
+            if container['Command'] is not None:
+                msg = ' {}'.format(' '.join(container['Command']))
+            else:
+                msg = ' {}'.format('_')
             ret.append(self.curse_add_line(msg, splittable=True))
 
         return ret
 
+    def _msg_name(self, container, max_width):
+        """Build the container name."""
+        name = container['name']
+        if len(name) > max_width:
+            name = '_' + name[-max_width + 1:]
+        else:
+            name = name[:max_width]
+        return ' {:{width}}'.format(name, width=max_width)
+
     def container_alert(self, status):
         """Analyse the container status."""
-        if "Paused" in status:
-            return 'CAREFUL'
-        else:
+        if status in ('running'):
             return 'OK'
+        elif status in ('exited'):
+            return 'WARNING'
+        elif status in ('dead'):
+            return 'CRITICAL'
+        else:
+            return 'CAREFUL'
 
 
 class ThreadDockerGrabber(threading.Thread):
@@ -647,24 +632,26 @@ class ThreadDockerGrabber(threading.Thread):
     stats is a dict
     """
 
-    def __init__(self, docker_client, container_id):
-        """Init the class:
-        docker_client: instance of Docker-py client
-        container_id: Id of the container"""
-        logger.debug("docker plugin - Create thread for container {}".format(container_id[:12]))
+    def __init__(self, container):
+        """Init the class.
+
+        container: instance of Docker-py Container
+        """
         super(ThreadDockerGrabber, self).__init__()
         # Event needed to stop properly the thread
         self._stopper = threading.Event()
         # The docker-py return stats as a stream
-        self._container_id = container_id
-        self._stats_stream = docker_client.stats(container_id, decode=True)
+        self._container = container
+        self._stats_stream = container.stats(decode=True)
         # The class return the stats as a dict
         self._stats = {}
+        logger.debug("docker plugin - Create thread for container {}".format(self._container.name))
 
     def run(self):
-        """Function called to grab stats.
-        Infinite loop, should be stopped by calling the stop() method"""
+        """Grab the stats.
 
+        Infinite loop, should be stopped by calling the stop() method
+        """
         for i in self._stats_stream:
             self._stats = i
             time.sleep(0.1)
@@ -673,19 +660,19 @@ class ThreadDockerGrabber(threading.Thread):
 
     @property
     def stats(self):
-        """Stats getter"""
+        """Stats getter."""
         return self._stats
 
     @stats.setter
     def stats(self, value):
-        """Stats setter"""
+        """Stats setter."""
         self._stats = value
 
     def stop(self, timeout=None):
-        """Stop the thread"""
-        logger.debug("docker plugin - Close thread for container {}".format(self._container_id[:12]))
+        """Stop the thread."""
+        logger.debug("docker plugin - Close thread for container {}".format(self._container.name))
         self._stopper.set()
 
     def stopped(self):
-        """Return True is the thread is stopped"""
+        """Return True is the thread is stopped."""
         return self._stopper.isSet()

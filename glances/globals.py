@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -23,8 +23,7 @@ import errno
 import os
 import sys
 
-# Operating system flag
-# Note: Somes libs depends of OS
+# OS constants (some libraries/features are OS-dependent)
 BSD = sys.platform.find('bsd') != -1
 LINUX = sys.platform.startswith('linux')
 MACOS = sys.platform.startswith('darwin')

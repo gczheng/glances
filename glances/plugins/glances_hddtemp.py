@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -28,7 +28,6 @@ from glances.plugins.glances_plugin import GlancesPlugin
 
 
 class Plugin(GlancesPlugin):
-
     """Glances HDD temperature sensors plugin.
 
     stats is a list
@@ -36,7 +35,8 @@ class Plugin(GlancesPlugin):
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args)
+        super(Plugin, self).__init__(args=args,
+                                     stats_init_value=[])
 
         # Init the sensor class
         self.glancesgrabhddtemp = GlancesGrabHDDTemp(args=args)
@@ -45,34 +45,29 @@ class Plugin(GlancesPlugin):
         # The HDD temp is displayed within the sensors plugin
         self.display_curse = False
 
-        # Init stats
-        self.reset()
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = []
-
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update HDD stats using the input method."""
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         if self.input_method == 'local':
             # Update stats using the standard system lib
-            self.stats = self.glancesgrabhddtemp.get()
+            stats = self.glancesgrabhddtemp.get()
 
         else:
             # Update stats using SNMP
             # Not available for the moment
             pass
 
+        # Update the stats
+        self.stats = stats
+
         return self.stats
 
 
 class GlancesGrabHDDTemp(object):
-
     """Get hddtemp stats using a socket connection."""
 
     def __init__(self, host='127.0.0.1', port=7634, args=None):
@@ -140,8 +135,13 @@ class GlancesGrabHDDTemp(object):
         try:
             sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sck.connect((self.host, self.port))
-            data = sck.recv(4096)
-        except socket.error as e:
+            data = b''
+            while True:
+                received = sck.recv(4096)
+                if not received:
+                    break
+                data += received
+        except Exception as e:
             logger.debug("Cannot connect to an HDDtemp server ({}:{} => {})".format(self.host, self.port, e))
             logger.debug("Disable the HDDtemp module. Use the --disable-hddtemp to hide the previous message.")
             if self.args is not None:
@@ -149,6 +149,8 @@ class GlancesGrabHDDTemp(object):
             data = ""
         finally:
             sck.close()
+            if data != "":
+                logger.debug("Received data from the HDDtemp server: {}".format(data))
 
         return data
 

@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -61,6 +61,7 @@ class _GlancesCurses(object):
         'D': {'switch': 'disable_docker'},
         'd': {'switch': 'disable_diskio'},
         'F': {'switch': 'fs_free_space'},
+        'g': {'switch': 'generate_graph'},
         'G': {'switch': 'disable_gpu'},
         'h': {'switch': 'help_tag'},
         'I': {'switch': 'disable_ip'},
@@ -85,7 +86,21 @@ class _GlancesCurses(object):
         'u': {'auto_sort': False, 'sort_key': 'username'},
     }
 
-    _sort_loop = ['cpu_percent', 'memory_percent', 'username', 'cpu_times', 'io_counters', 'name']
+    _sort_loop = ['cpu_percent', 'memory_percent', 'username',
+                  'cpu_times', 'io_counters', 'name']
+
+    # Define top menu
+    _top = ['quicklook', 'cpu', 'percpu', 'gpu', 'mem', 'memswap', 'load']
+    _quicklook_max_width = 68
+
+    # Define left sidebar
+    _left_sidebar = ['network', 'wifi', 'ports', 'diskio', 'fs',
+                     'irq', 'folders', 'raid', 'sensors', 'now']
+    _left_sidebar_min_width = 23
+    _left_sidebar_max_width = 34
+
+    # Define right sidebar
+    _right_sidebar = ['docker', 'processcount', 'amps', 'processlist', 'alert']
 
     def __init__(self, config=None, args=None):
         # Init
@@ -122,9 +137,6 @@ class _GlancesCurses(object):
         # Init main window
         self.term_window = self.screen.subwin(0, 0)
 
-        # Init refresh time
-        self.__refresh_time = args.time
-
         # Init edit filter tag
         self.edit_filter = False
 
@@ -155,15 +167,6 @@ class _GlancesCurses(object):
         """Init the history option."""
 
         self.reset_history_tag = False
-        self.graph_tag = False
-        if self.args.export_graph:
-            logger.info('Export graphs function enabled with output path %s' %
-                        self.args.path_graph)
-            from glances.exports.graph import GlancesGraph
-            self.glances_graph = GlancesGraph(self.args.path_graph)
-            if not self.glances_graph.graph_enabled():
-                self.args.export_graph = False
-                logger.error('Export graphs disabled')
 
     def _init_cursor(self):
         """Init cursors."""
@@ -340,9 +343,7 @@ class _GlancesCurses(object):
             if return_to_browser:
                 logger.info("Stop Glances client and return to the browser")
             else:
-                self.end()
-                logger.info("Stop Glances")
-                sys.exit(0)
+                logger.info("Stop Glances (keypressed: {})".format(self.pressedkey))
         elif self.pressedkey == ord('\n'):
             # 'ENTER' > Edit the process filter
             self.edit_filter = not self.edit_filter
@@ -372,12 +373,6 @@ class _GlancesCurses(object):
             # 'f' > Show/hide fs / folder stats
             self.args.disable_fs = not self.args.disable_fs
             self.args.disable_folders = not self.args.disable_folders
-        elif self.pressedkey == ord('g'):
-            # 'g' > Generate graph from history
-            self.graph_tag = not self.graph_tag
-        elif self.pressedkey == ord('r'):
-            # 'r' > Reset graph history
-            self.reset_history_tag = not self.reset_history_tag
         elif self.pressedkey == ord('w'):
             # 'w' > Delete finished warning logs
             glances_logs.clean()
@@ -469,31 +464,39 @@ class _GlancesCurses(object):
         """New column in the curses interface."""
         self.column = self.next_column
 
-    def __get_stat_display(self, stats, plugin_max_width):
-        """Return a dict of dict with all the stats display
-        * key: plugin name
-        * value: dict returned by the get_stats_display Plugin method
+    def __get_stat_display(self, stats, layer):
+        """Return a dict of dict with all the stats display.
+        stats: Global stats dict
+        layer: ~ cs_status
+            "None": standalone or server mode
+            "Connected": Client is connected to a Glances server
+            "SNMP": Client is connected to a SNMP server
+            "Disconnected": Client is disconnected from the server
 
         :returns: dict of dict
+            * key: plugin name
+            * value: dict returned by the get_stats_display Plugin method
         """
         ret = {}
-        for p in stats.getAllPlugins(enable=False):
-            if p in ['network', 'wifi', 'irq', 'fs', 'folders']:
-                ret[p] = stats.get_plugin(p).get_stats_display(
-                    args=self.args, max_width=plugin_max_width)
-            elif p in ['quicklook']:
-                # Grab later because we need plugin size
+
+        for p in stats.getPluginsList(enable=False):
+            if p == 'quicklook' or p == 'processlist':
+                # processlist is done later
+                # because we need to know how many processes could be displayed
                 continue
-            else:
-                # system, uptime, cpu, percpu, gpu, load, mem, memswap, ip,
-                # ... diskio, raid, sensors, ports, now, docker, processcount,
-                # ... amps, alert
-                try:
-                    ret[p] = stats.get_plugin(p).get_stats_display(args=self.args)
-                except AttributeError:
-                    ret[p] = None
-        if self.args.percpu:
-            ret['cpu'] = ret['percpu']
+
+            # Compute the plugin max size
+            plugin_max_width = None
+            if p in self._left_sidebar:
+                plugin_max_width = max(self._left_sidebar_min_width,
+                                       self.screen.getmaxyx()[1] - 105)
+                plugin_max_width = min(self._left_sidebar_max_width,
+                                       plugin_max_width)
+
+            # Get the view
+            ret[p] = stats.get_plugin(p).get_stats_display(args=self.args,
+                                                           max_width=plugin_max_width)
+
         return ret
 
     def display(self, stats, cs_status=None):
@@ -513,28 +516,27 @@ class _GlancesCurses(object):
         # Init the internal line/column for Glances Curses
         self.init_line_column()
 
-        # No processes list in SNMP mode
-        if cs_status == 'SNMP':
-            # so... more space for others plugins
-            plugin_max_width = 43
-        else:
-            plugin_max_width = None
-
         # Update the stats messages
         ###########################
 
-        # Update the client server status
+        # Get all the plugins but quicklook and proceslist
         self.args.cs_status = cs_status
-        __stat_display = self.__get_stat_display(stats, plugin_max_width)
+        __stat_display = self.__get_stat_display(stats, layer=cs_status)
 
         # Adapt number of processes to the available space
         max_processes_displayed = (
             self.screen.getmaxyx()[0] - 11 -
-            self.get_stats_display_height(__stat_display["alert"]) -
-            self.get_stats_display_height(__stat_display["docker"])
-        )
+            (0 if 'docker' not in __stat_display else
+                self.get_stats_display_height(__stat_display["docker"])) -
+            (0 if 'processcount' not in __stat_display else
+                self.get_stats_display_height(__stat_display["processcount"])) -
+            (0 if 'amps' not in __stat_display else
+                self.get_stats_display_height(__stat_display["amps"])) -
+            (0 if 'alert' not in __stat_display else
+                self.get_stats_display_height(__stat_display["alert"])))
+
         try:
-            if self.args.enable_process_extended and not self.args.process_tree:
+            if self.args.enable_process_extended:
                 max_processes_displayed -= 4
         except AttributeError:
             pass
@@ -545,6 +547,7 @@ class _GlancesCurses(object):
             logger.debug("Set number of displayed processes to {}".format(max_processes_displayed))
             glances_processes.max_processes = max_processes_displayed
 
+        # Get the processlist
         __stat_display["processlist"] = stats.get_plugin(
             'processlist').get_stats_display(args=self.args)
 
@@ -563,12 +566,12 @@ class _GlancesCurses(object):
         # Display first line (system+ip+uptime)
         # Optionnaly: Cloud on second line
         # =====================================
-        self.__display_firstline(__stat_display)
+        self.__display_header(__stat_display)
 
         # ==============================================================
         # Display second line (<SUMMARY>+CPU|PERCPU+<GPU>+LOAD+MEM+SWAP)
         # ==============================================================
-        self.__display_secondline(__stat_display, stats)
+        self.__display_top(__stat_display, stats)
 
         # ==================================================================
         # Display left sidebar (NETWORK+PORTS+DISKIO+FS+SENSORS+Current time)
@@ -580,28 +583,9 @@ class _GlancesCurses(object):
         # ====================================
         self.__display_right(__stat_display)
 
-        # History option
-        # Generate history graph
-        if self.graph_tag and self.args.export_graph:
-            self.display_popup(
-                'Generate graphs history in {}\nPlease wait...'.format(
-                    self.glances_graph.get_output_folder()))
-            self.display_popup(
-                'Generate graphs history in {}\nDone: {} graphs generated'.format(
-                    self.glances_graph.get_output_folder(),
-                    self.glances_graph.generate_graph(stats)))
-        elif self.reset_history_tag and self.args.export_graph:
-            self.display_popup('Reset graph history')
-            self.glances_graph.reset(stats)
-        elif (self.graph_tag or self.reset_history_tag) and not self.args.export_graph:
-            try:
-                self.glances_graph.graph_enabled()
-            except Exception:
-                self.display_popup('Graph disabled\nEnable it using --export-graph')
-            else:
-                self.display_popup('Graph disabled')
-        self.graph_tag = False
-        self.reset_history_tag = False
+        # =====================
+        # Others popup messages
+        # =====================
 
         # Display edit filter popup
         # Only in standalone mode (cs_status is None)
@@ -623,35 +607,40 @@ class _GlancesCurses(object):
             self.display_popup('Process filter only available in standalone mode')
         self.edit_filter = False
 
+        # Display graph generation popup
+        if self.args.generate_graph:
+            self.display_popup('Generate graph in {}'.format(self.args.export_graph_path))
+
         return True
 
-    def __display_firstline(self, stat_display):
-        """Display the first line in the Curses interface.
+    def __display_header(self, stat_display):
+        """Display the firsts lines (header) in the Curses interface.
 
         system + ip + uptime
+        (cloud)
         """
-        # Space between column
-        self.space_between_column = 0
+        # First line
         self.new_line()
+        self.space_between_column = 0
         l_uptime = (self.get_stats_display_width(stat_display["system"]) +
-                    self.space_between_column +
-                    self.get_stats_display_width(stat_display["ip"]) + 3 +
-                    self.get_stats_display_width(stat_display["uptime"]))
+                    self.get_stats_display_width(stat_display["ip"]) +
+                    self.get_stats_display_width(stat_display["uptime"]) + 1)
         self.display_plugin(
             stat_display["system"],
             display_optional=(self.screen.getmaxyx()[1] >= l_uptime))
-        self.new_column()
-        self.display_plugin(stat_display["ip"])
-        # Space between column
         self.space_between_column = 3
         self.new_column()
-        self.display_plugin(stat_display["uptime"],
-                            add_space=self.get_stats_display_width(stat_display["cloud"]) == 0)
+        self.display_plugin(stat_display["ip"])
+        self.new_column()
+        self.display_plugin(
+            stat_display["uptime"],
+            add_space=-(self.get_stats_display_width(stat_display["cloud"]) != 0))
+        # Second line (optional)
         self.init_column()
         self.new_line()
         self.display_plugin(stat_display["cloud"])
 
-    def __display_secondline(self, stat_display, stats):
+    def __display_top(self, stat_display, stats):
         """Display the second line in the Curses interface.
 
         <QUICKLOOK> + CPU|PERCPU + <GPU> + MEM + SWAP + LOAD
@@ -663,27 +652,23 @@ class _GlancesCurses(object):
         stat_display['quicklook'] = {'msgdict': []}
 
         # Dict for plugins width
-        plugin_widths = {'quicklook': 0}
-        for p in ['cpu', 'gpu', 'mem', 'memswap', 'load']:
-            plugin_widths[p] = self.get_stats_display_width(stat_display[p]) if hasattr(self.args, 'disable_' + p) and p in stat_display else 0
+        plugin_widths = {}
+        for p in self._top:
+            plugin_widths[p] = self.get_stats_display_width(stat_display.get(p, 0)) if hasattr(self.args, 'disable_' + p) else 0
 
         # Width of all plugins
         stats_width = sum(itervalues(plugin_widths))
 
         # Number of plugin but quicklook
-        stats_number = (
-            int(not self.args.disable_cpu and stat_display["cpu"]['msgdict'] != []) +
-            int(not self.args.disable_gpu and stat_display["gpu"]['msgdict'] != []) +
-            int(not self.args.disable_mem and stat_display["mem"]['msgdict'] != []) +
-            int(not self.args.disable_memswap and stat_display["memswap"]['msgdict'] != []) +
-            int(not self.args.disable_load and stat_display["load"]['msgdict'] != []))
+        stats_number = sum([int(stat_display[p]['msgdict'] != []) for p in self._top if not getattr(self.args, 'disable_' + p)])
 
         if not self.args.disable_quicklook:
             # Quick look is in the place !
             if self.args.full_quicklook:
                 quicklook_width = self.screen.getmaxyx()[1] - (stats_width + 8 + stats_number * self.space_between_column)
             else:
-                quicklook_width = min(self.screen.getmaxyx()[1] - (stats_width + 8 + stats_number * self.space_between_column), 79)
+                quicklook_width = min(self.screen.getmaxyx()[1] - (stats_width + 8 + stats_number * self.space_between_column),
+                                      self._quicklook_max_width - 5)
             try:
                 stat_display["quicklook"] = stats.get_plugin(
                     'quicklook').get_stats_display(max_width=quicklook_width, args=self.args)
@@ -699,7 +684,7 @@ class _GlancesCurses(object):
         # Compute spaces between plugins
         # Note: Only one space between Quicklook and others
         plugin_display_optional = {}
-        for p in ['cpu', 'gpu', 'mem', 'memswap', 'load']:
+        for p in self._top:
             plugin_display_optional[p] = True
         if stats_number > 1:
             self.space_between_column = max(1, int((self.screen.getmaxyx()[1] - stats_width) / (stats_number - 1)))
@@ -714,7 +699,9 @@ class _GlancesCurses(object):
             self.space_between_column = 0
 
         # Display CPU, MEM, SWAP and LOAD
-        for p in ['cpu', 'gpu', 'mem', 'memswap', 'load']:
+        for p in self._top:
+            if p == 'quicklook':
+                continue
             if p in stat_display:
                 self.display_plugin(stat_display[p],
                                     display_optional=plugin_display_optional[p])
@@ -729,45 +716,41 @@ class _GlancesCurses(object):
         self.saved_line = self.next_line
 
     def __display_left(self, stat_display):
-        """Display the left sidebar in the Curses interface.
-
-        network+wifi+ports+diskio+fs+irq+folders+raid+sensors+now
-        """
+        """Display the left sidebar in the Curses interface."""
         self.init_column()
-        if not self.args.disable_left_sidebar:
-            for s in ['network', 'wifi', 'ports', 'diskio', 'fs', 'irq',
-                      'folders', 'raid', 'sensors', 'now']:
-                if ((hasattr(self.args, 'enable_' + s) or
-                     hasattr(self.args, 'disable_' + s)) and s in stat_display):
-                    self.new_line()
-                    self.display_plugin(stat_display[s])
+
+        if self.args.disable_left_sidebar:
+            return
+
+        for s in self._left_sidebar:
+            if ((hasattr(self.args, 'enable_' + s) or
+                 hasattr(self.args, 'disable_' + s)) and s in stat_display):
+                self.new_line()
+                self.display_plugin(stat_display[s])
 
     def __display_right(self, stat_display):
         """Display the right sidebar in the Curses interface.
 
         docker + processcount + amps + processlist + alert
         """
-        # If space available...
-        if self.screen.getmaxyx()[1] > 52:
-            # Restore line position
-            self.next_line = self.saved_line
+        # Do not display anything if space is not available...
+        if self.screen.getmaxyx()[1] < self._left_sidebar_min_width:
+            return
 
-            # Display right sidebar
-            # DOCKER+PROCESS_COUNT+AMPS+PROCESS_LIST+ALERT
-            self.new_column()
+        # Restore line position
+        self.next_line = self.saved_line
+
+        # Display right sidebar
+        self.new_column()
+        for p in self._right_sidebar:
             self.new_line()
-            self.display_plugin(stat_display["docker"])
-            self.new_line()
-            self.display_plugin(stat_display["processcount"])
-            self.new_line()
-            self.display_plugin(stat_display["amps"])
-            self.new_line()
-            self.display_plugin(stat_display["processlist"],
-                                display_optional=(self.screen.getmaxyx()[1] > 102),
-                                display_additional=(not MACOS),
-                                max_y=(self.screen.getmaxyx()[0] - self.get_stats_display_height(stat_display["alert"]) - 2))
-            self.new_line()
-            self.display_plugin(stat_display["alert"])
+            if p == 'processlist':
+                self.display_plugin(stat_display['processlist'],
+                                    display_optional=(self.screen.getmaxyx()[1] > 102),
+                                    display_additional=(not MACOS),
+                                    max_y=(self.screen.getmaxyx()[0] - self.get_stats_display_height(stat_display['alert']) - 2))
+            else:
+                self.display_plugin(stat_display[p])
 
     def display_popup(self, message,
                       size_x=None, size_y=None,
@@ -851,12 +834,13 @@ class _GlancesCurses(object):
                        display_optional=True,
                        display_additional=True,
                        max_y=65535,
-                       add_space=True):
+                       add_space=0):
         """Display the plugin_stats on the screen.
 
         If display_optional=True display the optional stats
         If display_additional=True display additionnal stats
-        max_y do not display line > max_y
+        max_y: do not display line > max_y
+        add_space: add x space (line) after the plugin
         """
         # Exit if:
         # - the plugin_stats message is empty
@@ -935,9 +919,8 @@ class _GlancesCurses(object):
             self.next_column, x_max + self.space_between_column)
         self.next_line = max(self.next_line, y + self.space_between_line)
 
-        if not add_space and self.next_line > 0:
-            # Do not have empty line after
-            self.next_line -= 1
+        # Have empty lines after the plugins
+        self.next_line += add_space
 
     def erase(self):
         """Erase the content of the screen."""
@@ -955,13 +938,18 @@ class _GlancesCurses(object):
         self.erase()
         self.display(stats, cs_status=cs_status)
 
-    def update(self, stats, cs_status=None, return_to_browser=False):
+    def update(self,
+               stats,
+               duration=3,
+               cs_status=None,
+               return_to_browser=False):
         """Update the screen.
 
-        Wait for __refresh_time sec / catch key every 100 ms.
+        Catch key every 100 ms.
 
         INPUT
         stats: Stats database to display
+        duration: duration of the loop
         cs_status:
             "None": standalone or server mode
             "Connected": Client is connected to the server
@@ -977,9 +965,15 @@ class _GlancesCurses(object):
         # Flush display
         self.flush(stats, cs_status=cs_status)
 
+        # If the duration is < 0 (update + export time > refresh_time)
+        # Then display the interface and log a message
+        if duration <= 0:
+            logger.debug('Update and export time higher than refresh_time.')
+            duration = 0.1
+
         # Wait
         exitkey = False
-        countdown = Timer(self.__refresh_time)
+        countdown = Timer(duration)
         while not countdown.finished() and not exitkey:
             # Getkey
             pressedkey = self.__catch_key(return_to_browser=return_to_browser)

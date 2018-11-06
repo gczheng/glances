@@ -2,17 +2,18 @@ bernhard
 bottle
 cassandra-driver
 couchdb
-docker
+docker>=2.0.0
 elasticsearch
 influxdb
 kafka-python
-matplotlib
 netifaces
 nvidia-ml-py3
+paho-mqtt
 pika
 potsdb
 prometheus_client
 py-cpuinfo
+pygal
 pymdstat
 pysnmp
 pystache
@@ -21,4 +22,5 @@ requests
 scandir; python_version < "3.5"
 statsd
 wifi
-zeroconf
+zeroconf==0.19.1; python_version < "3.0"
+zeroconf; python_version >= "3.0"

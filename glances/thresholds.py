@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -22,6 +22,7 @@ Thresholds classes: OK, CAREFUL, WARNING, CRITICAL
 """
 
 import sys
+from functools import total_ordering
 
 
 class GlancesThresholds(object):
@@ -63,6 +64,7 @@ class GlancesThresholds(object):
 glances_thresholds = GlancesThresholds()
 
 
+@total_ordering
 class _GlancesThreshold(object):
 
     """Father class for all other Thresholds"""
@@ -79,9 +81,11 @@ class _GlancesThreshold(object):
     def __str__(self):
         return self.description()
 
-    def __cmp__(self, other):
-        """Override the default comparaison behavior"""
-        return self.value().__cmp__(other.value())
+    def __lt__(self, other):
+        return self.value() < other.value()
+
+    def __eq__(self, other):
+        return self.value() == other.value()
 
 
 class GlancesThresholdOk(_GlancesThreshold):

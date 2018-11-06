@@ -1,6 +1,5 @@
-'use strict';
 
-function GlancesPluginProcesslistController($scope, GlancesStats, GlancesPluginHelper, $filter, CONFIG, ARGUMENTS) {
+export default function GlancesPluginProcesslistController($scope, GlancesStats, GlancesPluginHelper, $filter, CONFIG, ARGUMENTS) {
     var vm = this;
     vm.arguments = ARGUMENTS;
     vm.processes = [];
@@ -23,10 +22,32 @@ function GlancesPluginProcesslistController($scope, GlancesStats, GlancesPluginH
         for (var i = 0; i < processlistStats.length; i++) {
             var process = processlistStats[i];
 
-            process.memvirt = process.memory_info[1];
-            process.memres = process.memory_info[0];
-            process.timeplus = $filter('timedelta')(process.cpu_times);
-            process.timemillis = $filter('timemillis')(process.cpu_times);
+            process.memvirt = "?";
+            process.memres = "?";
+            if (process.memory_info) {
+                process.memvirt = process.memory_info[1];
+                process.memres = process.memory_info[0];
+            }
+
+            process.timeplus = "?";
+            process.timemillis = "?";
+            if (process.cpu_times) {
+                process.timeplus = $filter('timedelta')(process.cpu_times);
+                process.timemillis = $filter('timemillis')(process.cpu_times);
+            }
+
+            if (process.num_threads === null) {
+              process.num_threads = -1;
+            }
+
+            if (process.cpu_percent === null) {
+              process.cpu_percent = -1;
+            }
+
+            if (process.memory_percent  === null) {
+              process.memory_percent = -1;
+            }
+
 
             process.ioRead = null;
             process.ioWrite = null;

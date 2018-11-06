@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -29,20 +29,21 @@ batinfo_tag = True
 try:
     import batinfo
 except ImportError:
-    logger.debug("batpercent plugin - Batinfo library not found. Trying fallback to PsUtil.")
+    logger.debug("batinfo library not found. Fallback to psutil.")
     batinfo_tag = False
 
-# PsUtil library 5.2.0 or higher (optional; Linux-only)
+# Availability:
+# Linux, Windows, FreeBSD (psutil>=5.1.0)
+# macOS (psutil>=5.4.2)
 psutil_tag = True
 try:
     psutil.sensors_battery()
-except AttributeError:
-    logger.debug("batpercent plugin - PsUtil 5.2.0 or higher is needed to grab battery stats.")
+except Exception as e:
+    logger.error("Cannot grab battery status {}.".format(e))
     psutil_tag = False
 
 
 class Plugin(GlancesPlugin):
-
     """Glances battery capacity plugin.
 
     stats is a list
@@ -50,7 +51,8 @@ class Plugin(GlancesPlugin):
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args)
+        super(Plugin, self).__init__(args=args,
+                                     stats_init_value=[])
 
         # Init the sensor class
         self.glancesgrabbat = GlancesGrabBat()
@@ -59,35 +61,30 @@ class Plugin(GlancesPlugin):
         # The HDD temp is displayed within the sensors plugin
         self.display_curse = False
 
-        # Init stats
-        self.reset()
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = []
-
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update battery capacity stats using the input method."""
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         if self.input_method == 'local':
             # Update stats
             self.glancesgrabbat.update()
-            self.stats = self.glancesgrabbat.get()
+            stats = self.glancesgrabbat.get()
 
         elif self.input_method == 'snmp':
             # Update stats using SNMP
             # Not avalaible
             pass
 
+        # Update the stats
+        self.stats = stats
+
         return self.stats
 
 
 class GlancesGrabBat(object):
-
     """Get batteries stats using the batinfo library."""
 
     def __init__(self):
@@ -112,7 +109,7 @@ class GlancesGrabBat(object):
                 'value': self.battery_percent,
                 'unit': '%'}]
         elif psutil_tag and hasattr(self.bat.sensors_battery(), 'percent'):
-            # Use the PSUtil 5.2.0 or higher lib to grab the stats
+            # Use psutil to grab the stats
             # Give directly the battery percent
             self.bat_list = [{
                 'label': 'Battery',

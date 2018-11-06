@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -21,32 +21,28 @@
 
 import numbers
 
+from glances.compat import nativestr
 from glances.folder_list import FolderList as glancesFolderList
 from glances.plugins.glances_plugin import GlancesPlugin
 
 
 class Plugin(GlancesPlugin):
-
     """Glances folder plugin."""
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args)
+        super(Plugin, self).__init__(args=args,
+                                     stats_init_value=[])
 
         # We want to display the stat in the curse interface
         self.display_curse = True
 
         # Init stats
         self.glances_folders = None
-        self.reset()
 
     def get_key(self):
         """Return the key of the list."""
         return 'path'
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = []
 
     def load_limits(self, config):
         """Load the foldered list from the config file, if it exists."""
@@ -56,8 +52,8 @@ class Plugin(GlancesPlugin):
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update the foldered list."""
-        # Reset the list
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         if self.input_method == 'local':
             # Folder list only available in a full Glances environment
@@ -69,15 +65,17 @@ class Plugin(GlancesPlugin):
             self.glances_folders.update()
 
             # Put it on the stats var
-            self.stats = self.glances_folders.get()
+            stats = self.glances_folders.get()
         else:
             pass
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
     def get_alert(self, stat):
-        """Manage limits of the folder list"""
-
+        """Manage limits of the folder list."""
         if not isinstance(stat['size'], numbers.Number):
             return 'DEFAULT'
         else:
@@ -92,7 +90,7 @@ class Plugin(GlancesPlugin):
 
         return ret
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the dict to display in the curse interface."""
         # Init the return message
         ret = []
@@ -101,25 +99,29 @@ class Plugin(GlancesPlugin):
         if not self.stats or self.is_disable():
             return ret
 
-        # Build the string message
+        # Max size for the interface name
+        name_max_width = max_width - 7
+
         # Header
-        msg = '{}'.format('FOLDERS')
+        msg = '{:{width}}'.format('FOLDERS',
+                                  width=name_max_width)
         ret.append(self.curse_add_line(msg, "TITLE"))
 
         # Data
         for i in self.stats:
             ret.append(self.curse_new_line())
-            if len(i['path']) > 15:
+            if len(i['path']) > name_max_width:
                 # Cut path if it is too long
-                path = '_' + i['path'][-15 + 1:]
+                path = '_' + i['path'][-name_max_width + 1:]
             else:
                 path = i['path']
-            msg = '{:<16} '.format(path)
+            msg = '{:{width}}'.format(nativestr(path),
+                                      width=name_max_width)
             ret.append(self.curse_add_line(msg))
             try:
-                msg = '{:>6}'.format(self.auto_unit(i['size']))
+                msg = '{:>9}'.format(self.auto_unit(i['size']))
             except (TypeError, ValueError):
-                msg = '{:>6}'.format(i['size'])
+                msg = '{:>9}'.format(i['size'])
             ret.append(self.curse_add_line(msg, self.get_alert(i)))
 
         return ret

@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Angelo Poerio <angelo.poerio@gmail.com>
+# Copyright (C) 2018 Angelo Poerio <angelo.poerio@gmail.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -28,7 +28,6 @@ from glances.plugins.glances_plugin import GlancesPlugin
 
 
 class Plugin(GlancesPlugin):
-
     """Glances IRQ plugin.
 
     stats is a list
@@ -36,30 +35,25 @@ class Plugin(GlancesPlugin):
 
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args)
+        super(Plugin, self).__init__(args=args,
+                                     stats_init_value=[])
 
         # We want to display the stat in the curse interface
         self.display_curse = True
 
         # Init the stats
         self.irq = GlancesIRQ()
-        self.reset()
 
     def get_key(self):
         """Return the key of the list."""
         return self.irq.get_key()
 
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = []
-
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
-        """Update the IRQ stats"""
-
-        # Reset the list
-        self.reset()
+        """Update the IRQ stats."""
+        # Init new stats
+        stats = self.get_init_value()
 
         # IRQ plugin only available on GNU/Linux
         if not LINUX:
@@ -67,15 +61,19 @@ class Plugin(GlancesPlugin):
 
         if self.input_method == 'local':
             # Grab the stats
-            self.stats = self.irq.get()
+            stats = self.irq.get()
 
         elif self.input_method == 'snmp':
             # not available
             pass
 
-        # Get the TOP 5
-        self.stats = sorted(self.stats, key=operator.itemgetter(
-            'irq_rate'), reverse=True)[:5]  # top 5 IRQ by rate/s
+        # Get the TOP 5 (by rate/s)
+        stats = sorted(stats,
+                       key=operator.itemgetter('irq_rate'),
+                       reverse=True)[:5]
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
@@ -94,50 +92,47 @@ class Plugin(GlancesPlugin):
         if not LINUX or not self.stats or not self.args.enable_irq:
             return ret
 
-        if max_width is not None and max_width >= 23:
-            irq_max_width = max_width - 14
-        else:
-            irq_max_width = 9
+        # Max size for the interface name
+        name_max_width = max_width - 7
 
         # Build the string message
         # Header
-        msg = '{:{width}}'.format('IRQ', width=irq_max_width)
+        msg = '{:{width}}'.format('IRQ', width=name_max_width)
         ret.append(self.curse_add_line(msg, "TITLE"))
-        msg = '{:>14}'.format('Rate/s')
+        msg = '{:>9}'.format('Rate/s')
         ret.append(self.curse_add_line(msg))
 
         for i in self.stats:
             ret.append(self.curse_new_line())
-            msg = '{:<15}'.format(i['irq_line'][:15])
+            msg = '{:{width}}'.format(i['irq_line'][:name_max_width],
+                                      width=name_max_width)
             ret.append(self.curse_add_line(msg))
-            msg = '{:>8}'.format(str(i['irq_rate']))
+            msg = '{:>9}'.format(str(i['irq_rate']))
             ret.append(self.curse_add_line(msg))
 
         return ret
 
 
 class GlancesIRQ(object):
-    """
-    This class manages the IRQ file
-    """
+    """This class manages the IRQ file."""
 
     IRQ_FILE = '/proc/interrupts'
 
     def __init__(self):
-        """
-        Init the class
+        """Init the class.
+
         The stat are stored in a internal list of dict
         """
         self.lasts = {}
         self.reset()
 
     def reset(self):
-        """Reset the stats"""
+        """Reset the stats."""
         self.stats = []
         self.cpu_number = 0
 
     def get(self):
-        """Return the current IRQ stats"""
+        """Return the current IRQ stats."""
         return self.__update()
 
     def get_key(self):
@@ -145,7 +140,7 @@ class GlancesIRQ(object):
         return 'irq_line'
 
     def __header(self, line):
-        """The header contain the number of CPU
+        """Build the header (contain the number of CPU).
 
         CPU0       CPU1       CPU2       CPU3
         0:         21          0          0          0   IO-APIC   2-edge      timer
@@ -154,8 +149,7 @@ class GlancesIRQ(object):
         return self.cpu_number
 
     def __humanname(self, line):
-        """Get a line and
-        Return the IRQ name, alias or number (choose the best for human)
+        """Return the IRQ name, alias or number (choose the best for human).
 
         IRQ line samples:
         1:      44487        341         44         72   IO-APIC   1-edge      i8042
@@ -169,8 +163,7 @@ class GlancesIRQ(object):
         return irq_line
 
     def __sum(self, line):
-        """Get a line and
-        Return the IRQ sum number
+        """Return the IRQ sum number.
 
         IRQ line samples:
         1:     44487        341         44         72   IO-APIC   1-edge      i8042
@@ -186,10 +179,7 @@ class GlancesIRQ(object):
         return ret
 
     def __update(self):
-        """
-        Load the IRQ file and update the internal dict
-        """
-
+        """Load the IRQ file and update the internal dict."""
         self.reset()
 
         if not os.path.exists(self.IRQ_FILE):

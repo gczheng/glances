@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -28,7 +28,6 @@ from glances.plugins.glances_plugin import GlancesPlugin
 
 
 class Plugin(GlancesPlugin):
-
     """Glances help plugin."""
 
     def __init__(self, args=None, config=None):
@@ -54,8 +53,9 @@ class Plugin(GlancesPlugin):
         pass
 
     def generate_view_data(self):
+        """Generate the views."""
         self.view_data['version'] = '{} {}'.format('Glances', __version__)
-        self.view_data['psutil_version'] = ' with PSutil {}'.format(psutil_version)
+        self.view_data['psutil_version'] = ' with psutil {}'.format(psutil_version)
 
         try:
             self.view_data['configuration_file'] = 'Configuration file: {}'.format(self.config.loaded_config_file)
@@ -103,9 +103,10 @@ class Plugin(GlancesPlugin):
         self.view_data['edit_pattern_filter'] = 'ENTER: Edit the process filter pattern'
 
     def get_view_data(self, args=None):
+        """Return the view."""
         return self.view_data
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the list to display in the curse interface."""
         # Init the return message
         ret = []

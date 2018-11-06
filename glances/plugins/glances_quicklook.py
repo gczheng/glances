@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -20,24 +20,23 @@
 """Quicklook plugin."""
 
 from glances.cpu_percent import cpu_percent
+from glances.logger import logger
 from glances.outputs.glances_bars import Bar
 from glances.plugins.glances_plugin import GlancesPlugin
 
 import psutil
 
-cpuinfo_tag = False
+# Import plugin specific dependency
 try:
     from cpuinfo import cpuinfo
-except ImportError:
-    # Correct issue #754
-    # Waiting for a correction on the upstream Cpuinfo lib
-    pass
+except ImportError as e:
+    cpuinfo_tag = False
+    logger.warning("Missing Python Lib ({}), Quicklook plugin will not display CPU info".format(e))
 else:
     cpuinfo_tag = True
 
 
 class Plugin(GlancesPlugin):
-
     """Glances quicklook plugin.
 
     'stats' is a dictionary.
@@ -50,28 +49,21 @@ class Plugin(GlancesPlugin):
         # We want to display the stat in the curse interface
         self.display_curse = True
 
-        # Init stats
-        self.reset()
-
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = {}
-
     @GlancesPlugin._check_decorator
     @GlancesPlugin._log_result_decorator
     def update(self):
         """Update quicklook stats using the input method."""
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         # Grab quicklook stats: CPU, MEM and SWAP
         if self.input_method == 'local':
             # Get the latest CPU percent value
-            self.stats['cpu'] = cpu_percent.get()
-            self.stats['percpu'] = cpu_percent.get(percpu=True)
-            # Use the PsUtil lib for the memory (virtual and swap)
-            self.stats['mem'] = psutil.virtual_memory().percent
-            self.stats['swap'] = psutil.swap_memory().percent
+            stats['cpu'] = cpu_percent.get()
+            stats['percpu'] = cpu_percent.get(percpu=True)
+            # Use the psutil lib for the memory (virtual and swap)
+            stats['mem'] = psutil.virtual_memory().percent
+            stats['swap'] = psutil.swap_memory().percent
         elif self.input_method == 'snmp':
             # Not available
             pass
@@ -82,9 +74,14 @@ class Plugin(GlancesPlugin):
             cpu_info = cpuinfo.get_cpu_info()
             #  Check cpu_info (issue #881)
             if cpu_info is not None:
-                self.stats['cpu_name'] = cpu_info['brand']
-                self.stats['cpu_hz_current'] = cpu_info['hz_actual_raw'][0]
-                self.stats['cpu_hz'] = cpu_info['hz_advertised_raw'][0]
+                stats['cpu_name'] = cpu_info.get('brand', 'CPU')
+                if 'hz_actual_raw' in cpu_info:
+                    stats['cpu_hz_current'] = cpu_info['hz_actual_raw'][0]
+                if 'hz_advertised_raw' in cpu_info:
+                    stats['cpu_hz'] = cpu_info['hz_advertised_raw'][0]
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
@@ -143,7 +140,7 @@ class Plugin(GlancesPlugin):
         return ret
 
     def _msg_create_line(self, msg, bar, key):
-        """Create a new line to the Quickview"""
+        """Create a new line to the Quickview."""
         ret = []
 
         ret.append(self.curse_add_line(msg))
@@ -155,5 +152,5 @@ class Plugin(GlancesPlugin):
         return ret
 
     def _hz_to_ghz(self, hz):
-        """Convert Hz to Ghz"""
+        """Convert Hz to Ghz."""
         return hz / 1000000000.0

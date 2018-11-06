@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -20,19 +20,27 @@
 """Glances main class."""
 
 import argparse
-import os
 import sys
 import tempfile
 
 from glances import __version__, psutil_version
 from glances.compat import input
 from glances.config import Config
-from glances.globals import LINUX, WINDOWS
+from glances.globals import WINDOWS
 from glances.logger import logger
 
 
-class GlancesMain(object):
+def disable(class_name, var):
+    """Set disable_<var> to True in the class class_name."""
+    setattr(class_name, 'disable_' + var, True)
 
+
+def enable(class_name, var):
+    """Set disable_<var> to False in the class class_name."""
+    setattr(class_name, 'disable_' + var, False)
+
+
+class GlancesMain(object):
     """Main class to manage Glances instance."""
 
     # Default stats' refresh time is 3 seconds
@@ -55,27 +63,40 @@ Examples of use:
   Monitor local machine (standalone mode):
     $ glances
 
-  Monitor local machine with the Web interface (Web UI):
+  Display all Glances modules (plugins and exporters) and exit:
+    $ glances --module-list
+
+  Monitor local machine with the Web interface and start RESTful server:
     $ glances -w
     Glances web server started on http://0.0.0.0:61208/
 
+  Only start RESTful API (without the WebUI):
+    $ glances -w --disable-webui
+    Glances API available on http://0.0.0.0:61208/api/
+
   Monitor local machine and export stats to a CSV file (standalone mode):
-    $ glances --export-csv /tmp/glances.csv
+    $ glances --export csv --export-csv-file /tmp/glances.csv
 
   Monitor local machine and export stats to a InfluxDB server with 5s refresh time (standalone mode):
-    $ glances -t 5 --export-influxdb
+    $ glances -t 5 --export influxdb
 
-  Start a Glances server (server mode):
+  Start a Glances XML/RCP server (server mode):
     $ glances -s
 
-  Connect Glances to a Glances server (client mode):
+  Connect Glances to a Glances XML/RCP server (client mode):
     $ glances -c <ip_server>
 
   Connect Glances to a Glances server and export stats to a StatsD server (client mode):
-    $ glances -c <ip_server> --export-statsd
+    $ glances -c <ip_server> --export statsd
 
   Start the client browser (browser mode):
     $ glances --browser
+
+  Display stats to stdout:
+    $ glances --stdout cpu.user,mem.used,load
+
+  Disable some plugins (any modes):
+    $ glances --disable-plugin network,ports
 """
 
     def __init__(self):
@@ -97,49 +118,21 @@ Examples of use:
                             dest='debug', help='enable debug mode')
         parser.add_argument('-C', '--config', dest='conf_file',
                             help='path to the configuration file')
-        # Enable or disable option on startup
-        parser.add_argument('--disable-alert', action='store_true', default=False,
-                            dest='disable_alert', help='disable alert module')
-        parser.add_argument('--disable-amps', action='store_true', default=False,
-                            dest='disable_amps', help='disable applications monitoring process (AMP) module')
-        parser.add_argument('--disable-cloud', action='store_true', default=False,
-                            dest='disable_cloud', help='disable Cloud module')
-        parser.add_argument('--disable-cpu', action='store_true', default=False,
-                            dest='disable_cpu', help='disable CPU module')
-        parser.add_argument('--disable-diskio', action='store_true', default=False,
-                            dest='disable_diskio', help='disable disk I/O module')
-        parser.add_argument('--disable-docker', action='store_true', default=False,
-                            dest='disable_docker', help='disable Docker module')
-        parser.add_argument('--disable-folders', action='store_true', default=False,
-                            dest='disable_folders', help='disable folder module')
-        parser.add_argument('--disable-fs', action='store_true', default=False,
-                            dest='disable_fs', help='disable filesystem module')
-        parser.add_argument('--disable-gpu', action='store_true', default=False,
-                            dest='disable_gpu', help='disable GPU module')
-        parser.add_argument('--disable-hddtemp', action='store_true', default=False,
-                            dest='disable_hddtemp', help='disable HD temperature module')
-        parser.add_argument('--disable-ip', action='store_true', default=False,
-                            dest='disable_ip', help='disable IP module')
-        parser.add_argument('--disable-load', action='store_true', default=False,
-                            dest='disable_load', help='disable load module')
-        parser.add_argument('--disable-mem', action='store_true', default=False,
-                            dest='disable_mem', help='disable memory module')
-        parser.add_argument('--disable-memswap', action='store_true', default=False,
-                            dest='disable_memswap', help='disable memory swap module')
-        parser.add_argument('--disable-network', action='store_true', default=False,
-                            dest='disable_network', help='disable network module')
-        parser.add_argument('--disable-now', action='store_true', default=False,
-                            dest='disable_now', help='disable current time module')
-        parser.add_argument('--disable-ports', action='store_true', default=False,
-                            dest='disable_ports', help='disable ports scanner module')
+        # Disable plugin
+        parser.add_argument('--modules-list', '--module-list',
+                            action='store_true', default=False,
+                            dest='modules_list',
+                            help='display modules (plugins & exports) list and exit')
+        parser.add_argument('--disable-plugin', dest='disable_plugin',
+                            help='disable plugin (comma separed list)')
         parser.add_argument('--disable-process', action='store_true', default=False,
                             dest='disable_process', help='disable process module')
-        parser.add_argument('--disable-raid', action='store_true', default=False,
-                            dest='disable_raid', help='disable RAID module')
-        parser.add_argument('--disable-sensors', action='store_true', default=False,
-                            dest='disable_sensors', help='disable sensors module')
-        parser.add_argument('--disable-wifi', action='store_true', default=False,
-                            dest='disable_wifi', help='disable wifi module')
+        # Enable or disable option
+        parser.add_argument('--disable-webui', action='store_true', default=False,
+                            dest='disable_webui', help='disable the Web Interface')
+        parser.add_argument('--light', '--enable-light', action='store_true',
+                            default=False, dest='enable_light',
+                            help='light mode for Curses UI (disable all but top menu)')
         parser.add_argument('-0', '--disable-irix', action='store_true', default=False,
                             dest='disable_irix', help='task\'s cpu usage will be divided by the total number of CPUs')
         parser.add_argument('-1', '--percpu', action='store_true', default=False,
@@ -167,38 +160,20 @@ Examples of use:
         parser.add_argument('--enable-process-extended', action='store_true', default=False,
                             dest='enable_process_extended', help='enable extended stats on top process')
         # Export modules feature
-        parser.add_argument('--export-graph', action='store_true', default=None,
-                            dest='export_graph', help='export stats to graphs')
-        parser.add_argument('--path-graph', default=tempfile.gettempdir(),
-                            dest='path_graph', help='set the export path for graphs (default is {})'.format(tempfile.gettempdir()))
-        parser.add_argument('--export-csv', default=None,
-                            dest='export_csv', help='export stats to a CSV file')
-        parser.add_argument('--export-json', default=None,
-                            dest='export_json', help='export stats to a JSON file')
-        parser.add_argument('--export-cassandra', action='store_true', default=False,
-                            dest='export_cassandra', help='export stats to a Cassandra or Scylla server (cassandra lib needed)')
-        parser.add_argument('--export-couchdb', action='store_true', default=False,
-                            dest='export_couchdb', help='export stats to a CouchDB server (couch lib needed)')
-        parser.add_argument('--export-elasticsearch', action='store_true', default=False,
-                            dest='export_elasticsearch', help='export stats to an ElasticSearch server (elasticsearch lib needed)')
-        parser.add_argument('--export-influxdb', action='store_true', default=False,
-                            dest='export_influxdb', help='export stats to an InfluxDB server (influxdb lib needed)')
-        parser.add_argument('--export-kafka', action='store_true', default=False,
-                            dest='export_kafka', help='export stats to a Kafka server (kafka-python lib needed)')
-        parser.add_argument('--export-opentsdb', action='store_true', default=False,
-                            dest='export_opentsdb', help='export stats to an OpenTSDB server (potsdb lib needed)')
-        parser.add_argument('--export-prometheus', action='store_true', default=False,
-                            dest='export_prometheus', help='export stats to a Prometheus exporter (prometheus_client lib needed)')
-        parser.add_argument('--export-rabbitmq', action='store_true', default=False,
-                            dest='export_rabbitmq', help='export stats to rabbitmq broker (pika lib needed)')
-        parser.add_argument('--export-restful', action='store_true', default=False,
-                            dest='export_restful', help='export stats to a Restful endpoint (requests lib needed)')
-        parser.add_argument('--export-riemann', action='store_true', default=False,
-                            dest='export_riemann', help='export stats to riemann broker (bernhard lib needed)')
-        parser.add_argument('--export-statsd', action='store_true', default=False,
-                            dest='export_statsd', help='export stats to a StatsD server (statsd lib needed)')
-        parser.add_argument('--export-zeromq', action='store_true', default=False,
-                            dest='export_zeromq', help='export stats to a ZeroMQ server (pyzmq lib needed)')
+        parser.add_argument('--export', dest='export',
+                            help='enable export module (comma separed list)')
+        parser.add_argument('--export-csv-file',
+                            default='./glances.csv',
+                            dest='export_csv_file',
+                            help='file path for CSV exporter')
+        parser.add_argument('--export-json-file',
+                            default='./glances.json',
+                            dest='export_json_file',
+                            help='file path for JSON exporter')
+        parser.add_argument('--export-graph-path',
+                            default=tempfile.gettempdir(),
+                            dest='export_graph_path',
+                            help='Folder for Graph exporter')
         # Client/Server option
         parser.add_argument('-c', '--client', dest='client',
                             help='connect to a Glances server by IPv4/IPv6 address or hostname')
@@ -243,12 +218,11 @@ Examples of use:
                             dest='process_filter', help='set the process filter pattern (regular expression)')
         parser.add_argument('--process-short-name', action='store_true', default=False,
                             dest='process_short_name', help='force short name for processes name')
+        parser.add_argument('--stdout', default=None,
+                            dest='stdout', help='display stats to stdout (comma separated list of plugins/plugins.attribute)')
         if not WINDOWS:
             parser.add_argument('--hide-kernel-threads', action='store_true', default=False,
-                                dest='no_kernel_threads', help='hide kernel threads in process list')
-        if LINUX:
-            parser.add_argument('--tree', action='store_true', default=False,
-                                dest='process_tree', help='display processes as a tree')
+                                dest='no_kernel_threads', help='hide kernel threads in process list (not available on Windows)')
         parser.add_argument('-b', '--byte', action='store_true', default=False,
                             dest='byte', help='display network rate in byte per second')
         parser.add_argument('--diskio-show-ramfs', action='store_true', default=False,
@@ -277,6 +251,19 @@ Examples of use:
         if args.debug:
             from logging import DEBUG
             logger.setLevel(DEBUG)
+        else:
+            from warnings import simplefilter
+            simplefilter("ignore")
+
+        # Plugins disable/enable
+        if args.disable_plugin is not None:
+            for p in args.disable_plugin.split(','):
+                disable(args, p)
+
+        # Exporters activation
+        if args.export is not None:
+            for p in args.export.split(','):
+                setattr(args, 'export_' + p, True)
 
         # Client/server Port
         if args.port is None:
@@ -296,7 +283,7 @@ Examples of use:
         if WINDOWS:
             args.webserver = True
 
-        # In web server mode, defaul refresh time: 5 sec
+        # In web server mode, default refresh time: 5 sec
         if args.webserver:
             args.time = 5
             args.process_short_name = True
@@ -350,29 +337,42 @@ Examples of use:
         args.network_sum = False
         args.network_cumul = False
 
+        # Manage light mode
+        if args.enable_light:
+            logger.info("Light mode is on")
+            args.disable_left_sidebar = True
+            disable(args, 'process')
+            disable(args, 'alert')
+            disable(args, 'amps')
+            disable(args, 'docker')
+
         # Manage full quicklook option
         if args.full_quicklook:
-            logger.info("Disable QuickLook menu")
-            args.disable_quicklook = False
-            args.disable_cpu = True
-            args.disable_mem = True
-            args.disable_memswap = True
-            args.disable_load = False
+            logger.info("Full quicklook mode")
+            enable(args, 'quicklook')
+            disable(args, 'cpu')
+            disable(args, 'mem')
+            disable(args, 'memswap')
+            enable(args, 'load')
 
         # Manage disable_top option
         if args.disable_top:
             logger.info("Disable top menu")
-            args.disable_quicklook = True
-            args.disable_cpu = True
-            args.disable_mem = True
-            args.disable_memswap = True
-            args.disable_load = True
+            disable(args, 'quicklook')
+            disable(args, 'cpu')
+            disable(args, 'mem')
+            disable(args, 'memswap')
+            disable(args, 'load')
+
+        # Init the generate_graph tag
+        # Should be set to True to generate graphs
+        args.generate_graph = False
 
         # Control parameter and exit if it is not OK
         self.args = args
 
         # Export is only available in standalone or client mode (issue #614)
-        export_tag = any([getattr(args, a) for a in args.__dict__ if a.startswith('export_')])
+        export_tag = self.args.export is not None and any(self.args.export)
         if WINDOWS and export_tag:
             # On Windows, export is possible but only in quiet mode
             # See issue #1038
@@ -389,22 +389,9 @@ Examples of use:
                 "Process filter is only available in standalone mode")
             sys.exit(2)
 
-        # Check graph output path
-        if args.export_graph and args.path_graph is not None:
-            if not os.access(args.path_graph, os.W_OK):
-                logger.critical("Graphs output path {} doesn't exist or is not writable".format(args.path_graph))
-                sys.exit(2)
-            logger.debug(
-                "Graphs output path is set to {}".format(args.path_graph))
-
-        # For export graph, history is mandatory
-        if args.export_graph and args.disable_history:
-            logger.critical("Can not export graph if history is disabled")
-            sys.exit(2)
-
         # Disable HDDTemp if sensors are disabled
-        if args.disable_sensors:
-            args.disable_hddtemp = True
+        if getattr(args, 'disable_sensors', False):
+            disable(args, 'hddtemp')
             logger.debug("Sensors and HDDTemp are disabled")
 
         return args
@@ -445,11 +432,11 @@ Examples of use:
         return self.mode
 
     def __get_username(self, description=''):
-        """Read an username from the command line.
-        """
+        """Read an username from the command line."""
         return input(description)
 
-    def __get_password(self, description='', confirm=False, clear=False, username='glances'):
+    def __get_password(self, description='',
+                       confirm=False, clear=False, username='glances'):
         """Read a password from the command line.
 
         - if confirm = True, with confirmation

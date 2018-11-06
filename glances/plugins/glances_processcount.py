@@ -2,7 +2,7 @@
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2017 Nicolargo <nicolas@nicolargo.com>
+# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
 #
 # Glances is free software; you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -22,34 +22,48 @@
 from glances.processes import glances_processes
 from glances.plugins.glances_plugin import GlancesPlugin
 
-# Note: history items list is not compliant with process count
-#       if a filter is applyed, the graph will show the filtered processes count
+# Define the history items list
+items_history_list = [{'name': 'total',
+                       'description': 'Total number of processes',
+                       'y_unit': ''},
+                      {'name': 'running',
+                       'description': 'Total number of running processes',
+                       'y_unit': ''},
+                      {'name': 'sleeping',
+                       'description': 'Total number of sleeping processes',
+                       'y_unit': ''},
+                      {'name': 'thread',
+                       'description': 'Total number of threads',
+                       'y_unit': ''}]
 
 
 class Plugin(GlancesPlugin):
-
     """Glances process count plugin.
 
     stats is a list
     """
 
+    sort_for_human = {'io_counters': 'disk IO',
+                      'cpu_percent': 'CPU consumption',
+                      'memory_percent': 'memory consumption',
+                      'cpu_times': 'process time',
+                      'name': 'process name',
+                      None: 'None'}
+
     def __init__(self, args=None):
         """Init the plugin."""
-        super(Plugin, self).__init__(args=args)
+        super(Plugin, self).__init__(args=args,
+                                     items_history_list=items_history_list)
 
         # We want to display the stat in the curse interface
         self.display_curse = True
 
         # Note: 'glances_processes' is already init in the glances_processes.py script
 
-    def reset(self):
-        """Reset/init the stats."""
-        self.stats = {}
-
     def update(self):
         """Update processes stats using the input method."""
-        # Reset stats
-        self.reset()
+        # Init new stats
+        stats = self.get_init_value()
 
         if self.input_method == 'local':
             # Update stats using the standard system lib
@@ -57,15 +71,18 @@ class Plugin(GlancesPlugin):
             glances_processes.update()
 
             # Return the processes count
-            self.stats = glances_processes.getcount()
+            stats = glances_processes.getcount()
         elif self.input_method == 'snmp':
             # Update stats using SNMP
-            # !!! TODO
+            # Not avalaible
             pass
+
+        # Update the stats
+        self.stats = stats
 
         return self.stats
 
-    def msg_curse(self, args=None):
+    def msg_curse(self, args=None, max_width=None):
         """Return the dict to display in the curse interface."""
         # Init the return message
         ret = []
@@ -118,17 +135,17 @@ class Plugin(GlancesPlugin):
         ret.append(self.curse_add_line(msg))
 
         # Display sort information
+        try:
+            sort_human = self.sort_for_human[glances_processes.sort_key]
+        except KeyError:
+            sort_human = '?'
         if glances_processes.auto_sort:
             msg = 'sorted automatically'
             ret.append(self.curse_add_line(msg))
-            msg = ' by {}'.format(glances_processes.sort_key)
-            ret.append(self.curse_add_line(msg))
+            msg = ' by {}'.format(sort_human)
         else:
-            msg = 'sorted by {}'.format(glances_processes.sort_key)
-            ret.append(self.curse_add_line(msg))
-        ret[-1]["msg"] += ", %s view" % ("tree" if glances_processes.is_tree_enabled() else "flat")
-        # if args.disable_irix:
-        #     ret[-1]["msg"] += " - IRIX off"
+            msg = 'sorted by {}'.format(sort_human)
+        ret.append(self.curse_add_line(msg))
 
         # Return the message with decoration
         return ret
