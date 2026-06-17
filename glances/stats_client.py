@@ -1,38 +1,27 @@
-# -*- coding: utf-8 -*-
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
+# SPDX-FileCopyrightText: 2022 Nicolas Hennion <nicolas@nicolargo.com>
 #
-# Glances is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# Glances is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 """The stats server manager."""
 
+import importlib
 import sys
 
-from glances.stats import GlancesStats
 from glances.globals import sys_path
 from glances.logger import logger
+from glances.stats import GlancesStats
 
 
 class GlancesStatsClient(GlancesStats):
-
     """This class stores, updates and gives stats for the client."""
 
     def __init__(self, config=None, args=None):
         """Init the GlancesStatsClient class."""
-        super(GlancesStatsClient, self).__init__(config=config, args=args)
+        super().__init__(config=config, args=args)
 
         # Init the configuration
         self.config = config
@@ -42,21 +31,28 @@ class GlancesStatsClient(GlancesStats):
 
     def set_plugins(self, input_plugins):
         """Set the plugin list according to the Glances server."""
-        header = "glances_"
+        header = "glances.plugins."
         for item in input_plugins:
             # Import the plugin
             try:
-                plugin = __import__(header + item)
-            except ImportError:
+                plugin = importlib.import_module(header + item)
+            except ImportError as e:
                 # Server plugin can not be imported from the client side
-                logger.error("Can not import {} plugin. Please upgrade your Glances client/server version.".format(item))
+                logger.error(f"Can not import {item} plugin ({e}). Please upgrade your Glances client/server version.")
             else:
                 # Add the plugin to the dictionary
                 # The key is the plugin name
                 # for example, the file glances_xxx.py
                 # generate self._plugins_list["xxx"] = ...
-                logger.debug("Server uses {} plugin".format(item))
-                self._plugins[item] = plugin.Plugin(args=self.args)
+                logger.debug(f"Server uses {item} plugin")
+                if hasattr(plugin, 'PluginModel'):
+                    # Old fashion way to load the plugin (before Glances 5.0)
+                    # Should be removed in Glances 5.0 - see #3170
+                    self._plugins[item] = getattr(plugin, 'PluginModel')(args=self.args)
+                elif hasattr(plugin, item.capitalize() + 'Plugin'):
+                    # New fashion way to load the plugin (after Glances 5.0)
+                    self._plugins[item] = getattr(plugin, item.capitalize() + 'Plugin')(args=self.args)
+
         # Restoring system path
         sys.path = sys_path
 

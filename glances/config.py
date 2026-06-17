@@ -1,77 +1,74 @@
-# -*- coding: utf-8 -*-
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
+# SPDX-FileCopyrightText: 2022 Nicolas Hennion <nicolas@nicolargo.com>
 #
-# Glances is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# Glances is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 """Manage the configuration file."""
 
-import os
-import sys
+import builtins
 import multiprocessing
-from io import open
+import os
 import re
+import sys
 
-from glances.compat import ConfigParser, NoOptionError, system_exec
-from glances.globals import BSD, LINUX, MACOS, SUNOS, WINDOWS
+from glances.globals import BSD, LINUX, MACOS, SUNOS, WINDOWS, ConfigParser, NoOptionError, NoSectionError, system_exec
 from glances.logger import logger
+
+# Sections entirely blocked from the secure view
+_SECURE_BLOCKED_SECTIONS = frozenset(
+    {
+        "passwords",
+    }
+)
+
+# Key name patterns redacted in any section
+_SECURE_SENSITIVE_KEY_RE = re.compile(
+    r"password|token|secret|api_key|apikey|ssl_keyfile",
+    re.IGNORECASE,
+)
 
 
 def user_config_dir():
-    r"""Return the per-user config dir (full path).
+    r"""Return a list of per-user config dir (full path).
 
     - Linux, *BSD, SunOS: ~/.config/glances
     - macOS: ~/Library/Application Support/glances
     - Windows: %APPDATA%\glances
     """
+    paths = []
     if WINDOWS:
-        path = os.environ.get('APPDATA')
+        paths.append(os.environ.get('APPDATA'))
     elif MACOS:
-        path = os.path.expanduser('~/Library/Application Support')
+        paths.append(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'))
+        paths.append(os.path.expanduser('~/Library/Application Support'))
     else:
-        path = os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config')
-    if path is None:
-        path = ''
-    else:
-        path = os.path.join(path, 'glances')
+        paths.append(os.environ.get('XDG_CONFIG_HOME') or os.path.expanduser('~/.config'))
 
-    return path
+    return [os.path.join(path, 'glances') if path is not None else '' for path in paths]
 
 
 def user_cache_dir():
-    r"""Return the per-user cache dir (full path).
+    r"""Return a list of per-user cache dir (full path).
 
     - Linux, *BSD, SunOS: ~/.cache/glances
     - macOS: ~/Library/Caches/glances
     - Windows: {%LOCALAPPDATA%,%APPDATA%}\glances\cache
     """
     if WINDOWS:
-        path = os.path.join(os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA'),
-                            'glances', 'cache')
+        path = os.path.join(os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA'), 'glances', 'cache')
     elif MACOS:
         path = os.path.expanduser('~/Library/Caches/glances')
     else:
-        path = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'),
-                            'glances')
+        path = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'glances')
 
-    return path
+    return [path]
 
 
 def system_config_dir():
-    r"""Return the system-wide config dir (full path).
+    r"""Return a list of system-wide config dir (full path).
 
     - Linux, SunOS: /etc/glances
     - *BSD, macOS: /usr/local/etc/glances
@@ -88,26 +85,64 @@ def system_config_dir():
     else:
         path = os.path.join(path, 'glances')
 
-    return path
+    return [path]
 
 
-class Config(object):
+def default_config_dir():
+    r"""Return a list of system-wide config dir (full path).
 
+    - Linux, SunOS, *BSD, macOS: /usr/share/doc (as defined in the setup.py files)
+    - Windows: %APPDATA%\glances
+    """
+    paths = []
+
+    # Add system path
+    if LINUX or SUNOS or BSD or MACOS:
+        paths.append(os.path.join(sys.prefix, 'share', 'doc'))
+    else:
+        paths.append(os.environ.get('APPDATA'))
+
+    # If we are in venv (issue #2803), sys.prefix != sys.base_prefix and we
+    # already added venv path with sys.prefix. Add base_prefix path too
+    if in_virtualenv():
+        paths.append(os.path.join(sys.base_prefix, 'share', 'doc'))
+
+    return [os.path.join(path, 'glances') if path is not None else '' for path in paths]
+
+
+def in_virtualenv():
+    # Source: https://stackoverflow.com/questions/1871549/how-to-determine-if-python-is-running-inside-a-virtualenv/1883251#1883251
+    return sys.prefix != get_base_prefix_compat()
+
+
+def get_base_prefix_compat():
+    """Get base/real prefix, or sys.prefix if there is none."""
+    # Source: https://stackoverflow.com/questions/1871549/how-to-determine-if-python-is-running-inside-a-virtualenv/1883251#1883251
+    return getattr(sys, "base_prefix", None) or getattr(sys, "real_prefix", None) or sys.prefix
+
+
+class Config:
     """This class is used to access/read config file, if it exists.
 
     :param config_dir: the path to search for config file
     :type config_dir: str or None
     """
 
-    def __init__(self, config_dir=None):
+    def __init__(self, config_dir=None, disable_config_exec=False):
         self.config_dir = config_dir
         self.config_filename = 'glances.conf'
         self._loaded_config_file = None
+        self._config_file_paths = self.config_file_paths()
+        self._disable_config_exec = disable_config_exec
 
-        # Re patern for optimize research of `foo`
-        self.re_pattern = re.compile('(\`.+?\`)')
+        # Re pattern for optimize research of `foo`
+        self.re_pattern = re.compile(r'(\`.+?\`)')
 
-        self.parser = ConfigParser()
+        try:
+            self.parser = ConfigParser(interpolation=None)
+        except TypeError:
+            self.parser = ConfigParser()
+
         self.read()
 
     def config_file_paths(self):
@@ -118,40 +153,58 @@ class Config(object):
         * custom path: /path/to/glances
         * Linux, SunOS: ~/.config/glances, /etc/glances
         * *BSD: ~/.config/glances, /usr/local/etc/glances
-        * macOS: ~/Library/Application Support/glances, /usr/local/etc/glances
+        * macOS: ~/.config/glances, ~/Library/Application Support/glances, /usr/local/etc/glances
         * Windows: %APPDATA%\glances
 
         The config file will be searched in the following order of priority:
             * /path/to/file (via -C flag)
             * user's home directory (per-user settings)
             * system-wide directory (system-wide settings)
+            * default pip directory (as defined in the setup.py file)
         """
         paths = []
 
+        # self.config_dir is the path to the config file (via -C flag)
         if self.config_dir:
             paths.append(self.config_dir)
 
-        paths.append(os.path.join(user_config_dir(), self.config_filename))
-        paths.append(os.path.join(system_config_dir(), self.config_filename))
+        # user_config_dir() returns a list of paths
+        paths.extend([os.path.join(path, self.config_filename) for path in user_config_dir()])
+
+        # system_config_dir() returns a list of paths
+        paths.extend([os.path.join(path, self.config_filename) for path in system_config_dir()])
+
+        # default_config_dir() returns a list of paths
+        paths.extend([os.path.join(path, self.config_filename) for path in default_config_dir()])
 
         return paths
 
     def read(self):
         """Read the config file, if it exists. Using defaults otherwise."""
-        for config_file in self.config_file_paths():
-            logger.info('Search glances.conf file in {}'.format(config_file))
+        for config_file in self._config_file_paths:
+            logger.debug(f'Search glances.conf file in {config_file}')
             if os.path.exists(config_file):
                 try:
-                    with open(config_file, encoding='utf-8') as f:
+                    with builtins.open(config_file, encoding='utf-8') as f:
                         self.parser.read_file(f)
                         self.parser.read(f)
-                    logger.info("Read configuration file '{}'".format(config_file))
+                    logger.info(f"Read configuration file '{config_file}'")
                 except UnicodeDecodeError as err:
-                    logger.error("Can not read configuration file '{}': {}".format(config_file, err))
+                    logger.error(f"Can not read configuration file '{config_file}': {err}")
                     sys.exit(1)
                 # Save the loaded configuration file path (issue #374)
                 self._loaded_config_file = config_file
                 break
+
+        # Set the default values for section not configured
+        self.sections_set_default()
+
+    def sections_set_default(self):
+        # Globals
+        if not self.parser.has_section('global'):
+            self.parser.add_section('global')
+        self.set_default('global', 'strftime_format', '')
+        self.set_default('global', 'check_update', 'true')
 
         # Quicklook
         if not self.parser.has_section('quicklook'):
@@ -168,16 +221,26 @@ class Config(object):
         self.set_default_cwc('cpu', 'steal')
         # By default I/O wait should be lower than 1/number of CPU cores
         iowait_bottleneck = (1.0 / multiprocessing.cpu_count()) * 100.0
-        self.set_default_cwc('cpu', 'iowait',
-                             [str(iowait_bottleneck - (iowait_bottleneck * 0.20)),
-                              str(iowait_bottleneck - (iowait_bottleneck * 0.10)),
-                              str(iowait_bottleneck)])
+        self.set_default_cwc(
+            'cpu',
+            'iowait',
+            [
+                str(iowait_bottleneck - (iowait_bottleneck * 0.20)),
+                str(iowait_bottleneck - (iowait_bottleneck * 0.10)),
+                str(iowait_bottleneck),
+            ],
+        )
         # Context switches bottleneck identification #1212
         ctx_switches_bottleneck = (500000 * 0.10) * multiprocessing.cpu_count()
-        self.set_default_cwc('cpu', 'ctx_switches',
-                             [str(ctx_switches_bottleneck - (ctx_switches_bottleneck * 0.20)),
-                              str(ctx_switches_bottleneck - (ctx_switches_bottleneck * 0.10)),
-                              str(ctx_switches_bottleneck)])
+        self.set_default_cwc(
+            'cpu',
+            'ctx_switches',
+            [
+                str(ctx_switches_bottleneck - (ctx_switches_bottleneck * 0.20)),
+                str(ctx_switches_bottleneck - (ctx_switches_bottleneck * 0.10)),
+                str(ctx_switches_bottleneck),
+            ],
+        )
 
         # Per-CPU
         if not self.parser.has_section('percpu'):
@@ -214,9 +277,8 @@ class Config(object):
         # Sensors
         if not self.parser.has_section('sensors'):
             self.parser.add_section('sensors')
-        self.set_default_cwc('sensors', 'temperature_core', cwc=['60', '70', '80'])
         self.set_default_cwc('sensors', 'temperature_hdd', cwc=['45', '52', '60'])
-        self.set_default_cwc('sensors', 'battery', cwc=['80', '90', '95'])
+        self.set_default_cwc('sensors', 'battery', cwc=['70', '80', '90'])
 
         # Process list
         if not self.parser.has_section('processlist'):
@@ -238,6 +300,22 @@ class Config(object):
                 dictionary[section][option] = self.parser.get(section, option)
         return dictionary
 
+    def as_dict_secure(self):
+        """Return a sanitised copy of the configuration dict.
+
+        Intended for unauthenticated API access.
+        - Blocked sections are omitted entirely.
+        - Sensitive keys in remaining sections are replaced by '********'.
+        """
+        sanitized = {}
+        for section, options in self.as_dict().items():
+            if section in _SECURE_BLOCKED_SECTIONS:
+                continue
+            sanitized[section] = {
+                key: "********" if _SECURE_SENSITIVE_KEY_RE.search(key) else value for key, value in options.items()
+            }
+        return sanitized
+
     def sections(self):
         """Return a list of all sections."""
         return self.parser.sections()
@@ -250,9 +328,7 @@ class Config(object):
         """Return info about the existence of a section."""
         return self.parser.has_section(section)
 
-    def set_default_cwc(self, section,
-                        option_header=None,
-                        cwc=['50', '70', '90']):
+    def set_default_cwc(self, section, option_header=None, cwc=['50', '70', '90']):
         """Set default values for careful, warning and critical."""
         if option_header is None:
             header = ''
@@ -262,26 +338,24 @@ class Config(object):
         self.set_default(section, header + 'warning', cwc[1])
         self.set_default(section, header + 'critical', cwc[2])
 
-    def set_default(self, section, option,
-                    default):
+    def set_default(self, section, option, default):
         """If the option did not exist, create a default value."""
         if not self.parser.has_option(section, option):
             self.parser.set(section, option, default)
 
-    def get_value(self, section, option,
-                  default=None):
+    def get_value(self, section, option, default=None):
         """Get the value of an option, if it exists.
 
-        If it did not exist, then return de default value.
+        If it did not exist, then return the default value.
 
         It allows user to define dynamic configuration key (see issue#1204)
-        Dynamic vlaue should starts and end with the ` char
+        Dynamic value should starts and end with the ` char
         Example: prefix=`hostname`
         """
         ret = default
         try:
             ret = self.parser.get(section, option)
-        except NoOptionError:
+        except (NoOptionError, NoSectionError):
             pass
 
         # Search a substring `foo` and replace it by the result of its exec
@@ -289,21 +363,40 @@ class Config(object):
             try:
                 match = self.re_pattern.findall(ret)
                 for m in match:
-                    ret = ret.replace(m, system_exec(m[1:-1]))
+                    command = m[1:-1]
+                    if self._disable_config_exec:
+                        logger.warning(f"Config exec disabled: skipping command `{command}` in [{section}] {option}")
+                    else:
+                        logger.warning(f"Executing config command `{command}` for [{section}] {option}")
+                        ret = ret.replace(m, system_exec(command))
             except TypeError:
                 pass
         return ret
+
+    def get_list_value(self, section, option, default=None, separator=','):
+        """Get the list value of an option, if it exists."""
+        try:
+            return self.parser.get(section, option).split(separator)
+        except (NoOptionError, NoSectionError):
+            return default
 
     def get_int_value(self, section, option, default=0):
         """Get the int value of an option, if it exists."""
         try:
             return self.parser.getint(section, option)
-        except NoOptionError:
+        except (NoOptionError, NoSectionError):
             return int(default)
 
     def get_float_value(self, section, option, default=0.0):
         """Get the float value of an option, if it exists."""
         try:
             return self.parser.getfloat(section, option)
-        except NoOptionError:
+        except (NoOptionError, NoSectionError):
             return float(default)
+
+    def get_bool_value(self, section, option, default=True):
+        """Get the bool value of an option, if it exists."""
+        try:
+            return self.parser.getboolean(section, option)
+        except (NoOptionError, NoSectionError):
+            return bool(default)

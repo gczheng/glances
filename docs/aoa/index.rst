@@ -23,20 +23,27 @@ Legend:
    header
    quicklook
    cpu
-   gpu
-   load
    memory
+   load
+   gpu
+   npu
+   mpp
    network
+   connections
    wifi
    ports
-   disk
+   diskio
    fs
-   folders
    irq
+   folders
+   cloud
+   raid
+   smart
    sensors
+   hddtemp
    ps
-   monitor
+   containers
+   vms
    amps
-   logs
-   docker
+   events
    actions

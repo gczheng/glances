@@ -15,19 +15,12 @@ displayed.
 
 .. image:: ../_static/cpu-wide.png
 
-A character is also displayed just after the CPU header and shows the
-trend value:
-
-======== ==============================================================
-Trend    Status
-======== ==============================================================
-``-``    CPU value is equal to the mean of the six latests refreshes
-``\``    CPU value is lower than the mean of the six latests refreshes
-``/``    CPU value is higher than the mean of the six latests refreshes
-======== ==============================================================
-
 CPU stats description:
 
+- **total**: sum of all CPU percentages (except idle).
+- **total_min**: minimum total observed since Glances startup.
+- **total_max**: maximum total observed since Glances startup.
+- **total_mean**: mean (average) total computed from the history.
 - **user**: percent time spent in user space. User CPU time is the time
   spent on the processor running your program's code (or code in
   libraries).
@@ -46,6 +39,8 @@ CPU stats description:
   operations to complete.
 - **steal** *(Linux)*: percentage of time a virtual CPU waits for a real
   CPU while the hypervisor is servicing another virtual processor.
+- **guest** *(Linux)*: percentage of time a virtual CPU spends
+  servicing another virtual CPU under the control of the Linux kernel.
 - **ctx_sw**: number of context switches (voluntary + involuntary) per
   second. A context switch is a procedure that a computer's CPU (central
   processing unit) follows to change from one task (or process) to
@@ -55,10 +50,28 @@ CPU stats description:
   0 on Windows and SunOS.
 - **syscal**: number of system calls per second. Do not displayed on
   Linux (always 0).
+- **dpc**: *(Windows)*: time spent servicing deferred procedure calls.
 
 To switch to per-CPU stats, just hit the ``1`` key:
 
 .. image:: ../_static/per-cpu.png
+
+In this case, Glances will show on line per logical CPU on the system.
+If you have multiple core, it is possible to define the maximum number
+of CPU to display. The top 'max_cpu_display' will be display and an
+extra line with the mean of all others CPU will be added.
+
+.. code-block:: ini
+
+  [percpu]
+  # Define the maximum number of CPU display at a time
+  # If the number of CPU is higher than:
+  # - display the top 'max_cpu_display' (sorted by CPU consumption)
+  # - a last line will be added with the sum of all other CPUs
+  max_cpu_display=4
+
+Logical cores means the number of physical cores multiplied by the number
+of threads that can run on each core (this is known as Hyper Threading).
 
 By default, ``steal`` CPU time alerts aren't logged. If you want that,
 just add to the configuration file:

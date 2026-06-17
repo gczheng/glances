@@ -4,9 +4,9 @@ Applications Monitoring Process
 ===============================
 
 Thanks to Glances and its AMP module, you can add specific monitoring to
-running processes. AMPs are defined in the Glances [configuration file](http://glances.readthedocs.io/en/stable/config.html).
+running processes. AMPs are defined in the Glances :ref:`configuration file<config>`.
 
-You can disable AMP using the ``--disable-amps`` option or pressing the
+You can disable AMP using the ``--disable-plugin amps`` option or pressing the
 ``A`` key.
 
 Simple AMP
@@ -49,6 +49,42 @@ less than countmin):
 
 .. image:: ../_static/amp-python-warning.png
 
+If the regex option is not defined, the AMP will be executed every refresh
+time and the process count will not be displayed (countmin and countmax will
+be ignored).
+
+For example:
+
+.. code-block:: ini
+
+    [amp_conntrack]
+    enable=false
+    refresh=30
+    one_line=false
+    command=sysctl net.netfilter.nf_conntrack_count && sysctl net.netfilter.nf_conntrack_max
+
+Note: for multiple command, please use the '&&'' separator.
+
+For security reason, pipe is not directly allowed in a AMP command but you create a shell
+script with your command:
+
+.. code-block:: ini
+
+    $ cat /usr/local/bin/mycommand.sh
+    #!/bin/sh
+    ps -aux | wc -l
+
+and use it in the amps:
+
+.. code-block:: ini
+
+    [amp_amptest]
+    enable=true
+    regex=.*
+    refresh=15
+    one_line=false
+    command=/usr/local/bin/mycommand.sh
+
 User defined AMP
 ----------------
 
@@ -75,6 +111,37 @@ the Glances UI:
 
 You can force Glances to display the result in one line setting
 ``one_line`` to true.
+
+Security considerations
+-----------------------
+
+AMP ``command`` and ``service_cmd`` values are read verbatim from the
+configuration file and executed. The execution helper interprets three
+shell-like operators:
+
+- ``&&`` to chain commands
+- ``|`` to pipe one command output into the next one
+- ``>`` to redirect the output to a file
+
+These operators are convenient but mean that **anyone able to edit the
+Glances configuration file can run arbitrary commands or write to arbitrary
+files** through an AMP section.
+
+For system services or any deployment where the configuration file is not
+fully trusted, start Glances with the ``--disable-config-exec`` option. In
+addition to disabling backtick command execution in configuration values,
+this option makes AMP commands run as a single process: ``&&``, ``|`` and
+``>`` are then treated as literal arguments and are no longer interpreted, so
+an AMP command can neither chain commands, pipe, nor write to an arbitrary
+file.
+
+.. code-block:: console
+
+    $ glances --disable-config-exec
+
+Note: with ``--disable-config-exec`` set, AMP commands that rely on these
+operators stop working. Move such logic into a dedicated shell script and
+point the ``command`` option to that script instead.
 
 Embedded AMP
 ------------

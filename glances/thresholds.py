@@ -1,21 +1,10 @@
-# -*- coding: utf-8 -*-
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
+# SPDX-FileCopyrightText: 2022 Nicolas Hennion <nicolas@nicolargo.com>
 #
-# Glances is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# Glances is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 """
 Thresholds classes: OK, CAREFUL, WARNING, CRITICAL
@@ -25,10 +14,11 @@ import sys
 from functools import total_ordering
 
 
-class GlancesThresholds(object):
+class GlancesThresholds:
     """Class to manage thresholds dict for all Glances plugins:
+
     key: Glances stats (example: cpu_user)
-    value: Threasold* instance
+    value: Threshold instance
     """
 
     threshold_list = ['OK', 'CAREFUL', 'WARNING', 'CRITICAL']
@@ -47,26 +37,25 @@ class GlancesThresholds(object):
 
         if stat_name in self._thresholds:
             return self._thresholds[stat_name]
-        else:
-            return {}
+        return {}
 
     def add(self, stat_name, threshold_description):
         """Add a new threshold to the dict (key = stat_name)"""
         if threshold_description not in self.threshold_list:
             return False
-        else:
-            self._thresholds[stat_name] = getattr(self.current_module,
-                                                  'GlancesThreshold' + threshold_description.capitalize())()
-            return True
+
+        self._thresholds[stat_name] = getattr(
+            self.current_module, 'GlancesThreshold' + threshold_description.capitalize()
+        )()
+        return True
 
 
-# Global variable uses to share thresholds between Glances componants
+# Global variable uses to share thresholds between Glances components
 glances_thresholds = GlancesThresholds()
 
 
 @total_ordering
-class _GlancesThreshold(object):
-
+class _GlancesThreshold:
     """Father class for all other Thresholds"""
 
     def description(self):
@@ -89,32 +78,24 @@ class _GlancesThreshold(object):
 
 
 class GlancesThresholdOk(_GlancesThreshold):
-
     """Ok Threshold class"""
 
-    _threshold = {'description': 'OK',
-                  'value': 0}
+    _threshold = {'description': 'OK', 'value': 0}
 
 
 class GlancesThresholdCareful(_GlancesThreshold):
-
     """Careful Threshold class"""
 
-    _threshold = {'description': 'CAREFUL',
-                  'value': 1}
+    _threshold = {'description': 'CAREFUL', 'value': 1}
 
 
 class GlancesThresholdWarning(_GlancesThreshold):
-
     """Warning Threshold class"""
 
-    _threshold = {'description': 'WARNING',
-                  'value': 2}
+    _threshold = {'description': 'WARNING', 'value': 2}
 
 
 class GlancesThresholdCritical(_GlancesThreshold):
-
     """Warning Threshold class"""
 
-    _threshold = {'description': 'CRITICAL',
-                  'value': 3}
+    _threshold = {'description': 'CRITICAL', 'value': 3}

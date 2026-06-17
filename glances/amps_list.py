@@ -1,21 +1,10 @@
-# -*- coding: utf-8 -*-
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
+# SPDX-FileCopyrightText: 2022 Nicolas Hennion <nicolas@nicolargo.com>
 #
-# Glances is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# Glances is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 """Manage the AMPs list."""
 
@@ -23,14 +12,12 @@ import os
 import re
 import threading
 
-from glances.compat import listkeys, iteritems
+from glances.globals import amps_path, listkeys
 from glances.logger import logger
-from glances.globals import amps_path
 from glances.processes import glances_processes
 
 
-class AmpsList(object):
-
+class AmpsList:
     """This class describes the optional application monitoring process list.
 
     The AMP list is a list of processes with a specific monitoring action.
@@ -56,37 +43,32 @@ class AmpsList(object):
         if self.config is None:
             return False
 
-        # Display a warning (deprecated) message if the monitor section exist
-        if "monitor" in self.config.sections():
-            logger.warning("A deprecated [monitor] section exists in the Glances configuration file. You should use the new Applications Monitoring Process module instead (http://glances.readthedocs.io/en/develop/aoa/amps.html).")
-
-        header = "glances_"
-        # For each AMP scrip, call the load_config method
+        # For each AMP script, call the load_config method
         for s in self.config.sections():
             if s.startswith("amp_"):
                 # An AMP section exists in the configuration file
-                # If an AMP script exist in the glances/amps folder, use it
-                amp_conf_name = s[4:]
-                amp_script = os.path.join(amps_path, header + s[4:] + ".py")
-                if not os.path.exists(amp_script):
+                # If an AMP module exist in amps_path (glances/amps) folder then use it
+                amp_name = s[4:]
+                amp_module = os.path.join(amps_path, amp_name)
+                if not os.path.exists(amp_module):
                     # If not, use the default script
-                    amp_script = os.path.join(amps_path, "glances_default.py")
+                    amp_module = os.path.join(amps_path, "default")
                 try:
-                    amp = __import__(os.path.basename(amp_script)[:-3])
+                    amp = __import__(os.path.basename(amp_module))
                 except ImportError as e:
-                    logger.warning("Missing Python Lib ({}), cannot load {} AMP".format(e, amp_conf_name))
+                    logger.warning(f"Missing Python Lib ({e}), cannot load AMP {amp_name}")
                 except Exception as e:
-                    logger.warning("Cannot load {} AMP ({})".format(amp_conf_name, e))
+                    logger.warning(f"Cannot load AMP {amp_name} ({e})")
                 else:
                     # Add the AMP to the dictionary
                     # The key is the AMP name
                     # for example, the file glances_xxx.py
                     # generate self._amps_list["xxx"] = ...
-                    self.__amps_dict[amp_conf_name] = amp.Amp(name=amp_conf_name, args=self.args)
+                    self.__amps_dict[amp_name] = amp.Amp(name=amp_name, args=self.args)
                     # Load the AMP configuration
-                    self.__amps_dict[amp_conf_name].load_config(self.config)
+                    self.__amps_dict[amp_name].load_config(self.config)
         # Log AMPs list
-        logger.debug("AMPs list: {}".format(self.getList()))
+        logger.debug(f"AMPs list: {self.getList()}")
 
         return True
 
@@ -105,21 +87,27 @@ class AmpsList(object):
     def update(self):
         """Update the command result attributed."""
         # Get the current processes list (once)
-        processlist = glances_processes.getlist()
+        processlist = glances_processes.get_list()
 
         # Iter upon the AMPs dict
-        for k, v in iteritems(self.get()):
+        for k, v in self.get().items():
             if not v.enable():
                 # Do not update if the enable tag is set
                 continue
 
+            if v.regex() is None:
+                # If there is no regex, execute anyway (see issue #1690)
+                v.set_count(0)
+                # Call the AMP update method
+                thread = threading.Thread(target=v.update_wrapper, args=[[]])
+                thread.start()
+                continue
+
             amps_list = self._build_amps_list(v, processlist)
 
-            if len(amps_list) > 0:
+            if amps_list:
                 # At least one process is matching the regex
-                logger.debug("AMPS: {} processes {} detected ({})".format(len(amps_list),
-                                                                          k,
-                                                                          amps_list))
+                logger.debug(f"AMPS: {len(amps_list)} processes {k} detected ({amps_list})")
                 # Call the AMP update method
                 thread = threading.Thread(target=v.update_wrapper, args=[amps_list])
                 thread.start()
@@ -127,7 +115,7 @@ class AmpsList(object):
                 # Set the process number to 0
                 v.set_count(0)
                 if v.count_min() is not None and v.count_min() > 0:
-                    # Only display the "No running process message" if countmin is defined
+                    # Only display the "No running process message" if count_min is defined
                     v.set_result("No running process")
 
         return self.__amps_dict
@@ -137,25 +125,17 @@ class AmpsList(object):
 
         Search application monitored processes by a regular expression
         """
-        ret = []
         try:
             # Search in both cmdline and name (for kernel thread, see #1261)
-            for p in processlist:
-                add_it = False
-                if (re.search(amp_value.regex(), p['name']) is not None):
-                    add_it = True
-                else:
-                    for c in p['cmdline']:
-                        if (re.search(amp_value.regex(), c) is not None):
-                            add_it = True
-                            break
-                if add_it:
-                    ret.append({'pid': p['pid'],
-                                'cpu_percent': p['cpu_percent'],
-                                'memory_percent': p['memory_percent']})
+            ret = [
+                {'pid': p['pid'], 'cpu_percent': p['cpu_percent'], 'memory_percent': p['memory_percent']}
+                for p in processlist
+                if re.search(amp_value.regex(), p['name'])
+                or ((cmdline := p.get('cmdline')) and re.search(amp_value.regex(), ' '.join(cmdline)))
+            ]
 
         except (TypeError, KeyError) as e:
-            logger.debug("Can not build AMPS list ({})".format(e))
+            logger.debug(f"Can not build AMPS list ({e})")
 
         return ret
 

@@ -1,34 +1,18 @@
-# -*- coding: utf-8 -*-
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
+# SPDX-FileCopyrightText: 2022 Nicolas Hennion <nicolas@nicolargo.com>
 #
-# Glances is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# Glances is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 """Manage bars for Glances output."""
 
-from __future__ import division
-
 from math import modf
 
-curses_bars = [' ', ' ', ' ', ' ', '|', '|', '|', '|', '|']
 
-
-class Bar(object):
-
-    r"""Manage bar (progression or status).
+class Bar:
+    """Manage bar (progression or status).
 
     import sys
     import time
@@ -40,31 +24,54 @@ class Bar(object):
         sys.stdout.flush()
     """
 
-    def __init__(self, size, pre_char='[', post_char=']', empty_char=' ', with_text=True):
+    def __init__(
+        self,
+        size,
+        bar_char='|',
+        empty_char=' ',
+        pre_char='',
+        post_char='',
+        unit_char='%',
+        display_value=True,
+        min_value=0,
+        max_value=100,
+    ):
+        """Init a bar (used in Quicllook plugin)
+
+        Args:
+            size (_type_): Bar size
+            bar_char (str, optional): Bar character. Defaults to '|'.
+            empty_char (str, optional): Empty character. Defaults to ' '.
+            pre_char (str, optional): Display this char before the bar. Defaults to ''.
+            post_char (str, optional): Display this char after the bar. Defaults to ''.
+            unit_char (str, optional): Unit char to be displayed. Defaults to '%'.
+            display_value (bool, optional): Do i need to display the value. Defaults to True.
+            min_value (int, optional): Minimum value. Defaults to 0.
+            max_value (int, optional): Maximum value (percent can be higher). Defaults to 100.
+        """
+        # Build curses_bars
+        self.__curses_bars = [empty_char] * 5 + [bar_char] * 5
         # Bar size
         self.__size = size
         # Bar current percent
         self.__percent = 0
         # Min and max value
-        self.min_value = 0
-        self.max_value = 100
+        self.min_value = min_value
+        self.max_value = max_value
         # Char used for the decoration
         self.__pre_char = pre_char
         self.__post_char = post_char
         self.__empty_char = empty_char
-        self.__with_text = with_text
+        self.__unit_char = unit_char
+        # Value should be displayed ?
+        self.__display_value = display_value
 
     @property
     def size(self, with_decoration=False):
-        # Return the bar size, with or without decoration
-        if with_decoration:
-            return self.__size
-        if self.__with_text:
+        # Return the bar size
+        if self.__display_value:
             return self.__size - 6
-
-    # @size.setter
-    # def size(self, value):
-    #     self.__size = value
+        return self.__size
 
     @property
     def percent(self):
@@ -72,10 +79,8 @@ class Bar(object):
 
     @percent.setter
     def percent(self, value):
-        if value <= self.min_value:
+        if value < self.min_value:
             value = self.min_value
-        if value >= self.max_value:
-            value = self.max_value
         self.__percent = value
 
     @property
@@ -86,14 +91,36 @@ class Bar(object):
     def post_char(self):
         return self.__post_char
 
-    def __str__(self):
+    def get(self, overlay: str = None):
         """Return the bars."""
-        frac, whole = modf(self.size * self.percent / 100.0)
-        ret = curses_bars[8] * int(whole)
+        value = self.max_value if self.percent > self.max_value else self.percent
+
+        # Build the bar
+        frac, whole = modf(self.size * value / 100.0)
+        ret = self.__curses_bars[8] * int(whole)
         if frac > 0:
-            ret += curses_bars[int(frac * 8)]
+            ret += self.__curses_bars[int(frac * 8)]
             whole += 1
         ret += self.__empty_char * int(self.size - whole)
-        if self.__with_text:
-            ret = '{}{:5.1f}%'.format(ret, self.percent)
+
+        # Add the post and pre chars
+        ret = f'{self.__pre_char}{ret}{self.__post_char}'
+
+        # Add the value
+        if self.__display_value:
+            if self.percent >= self.max_value:
+                ret = '{} {}{:3.0f}{}'.format(
+                    ret, '>' if self.percent > self.max_value else ' ', self.max_value, self.__unit_char
+                )
+            else:
+                ret = f'{ret}{self.percent:5.1f}{self.__unit_char}'
+
+        # Add overlay
+        if overlay and len(overlay) < len(ret) - 6:
+            ret = overlay + ret[len(overlay) :]
+
         return ret
+
+    def __str__(self):
+        """Return the bars."""
+        return self.get()

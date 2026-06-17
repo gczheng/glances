@@ -17,8 +17,10 @@ In this case thresholds values are define in bps.
 Additionally, you can define:
 
 - a list of network interfaces to hide
+- automatically hide interfaces not up
+- automatically hide interfaces without IP address
 - per-interface limit values
-- aliases for interface name
+- aliases for interface name (use \ to espace special characters)
 
 The configuration should be done in the ``[network]`` section of the
 Glances configuration file.
@@ -39,8 +41,16 @@ virtual docker interface (docker0, docker1, ...):
     tx_critical=90
     # Define the list of hidden network interfaces (comma-separated regexp)
     hide=docker.*,lo
+    # Define the list of network interfaces to show (comma-separated regexp)
+    #show=eth0,eth1
+    # Automatically hide interface not up (default is False)
+    hide_no_up=True
+    # Automatically hide interface with no IP address (default is False)
+    hide_no_ip=True
+    # Set hide_zero to True to automatically hide interface with no traffic
+    hide_zero=False
     # WLAN 0 alias
-    wlan0_alias=Wireless IF
+    alias=wlan0:Wireless IF
     # It is possible to overwrite the bitrate thresholds per interface
     # WLAN 0 Default limits (in bits per second aka bps) for interface bitrate
     wlan0_rx_careful=4000000
@@ -51,3 +61,19 @@ virtual docker interface (docker0, docker1, ...):
     wlan0_tx_warning=900000
     wlan0_tx_critical=1000000
     wlan0_tx_log=True
+
+Filtering is based on regular expression. Please be sure that your regular
+expression works as expected. You can use an online tool like `regex101`_ in
+order to test your regular expression.
+
+You also can automatically hide interface with no traffic using the
+``hide_zero`` configuration key. The optional ``hide_threshold_bytes`` option
+can also be used to set a threshold higher than zero.
+
+.. code-block:: ini
+
+    [network]
+    hide_zero=True
+    hide_threshold_bytes=0
+
+.. _regex101: https://regex101.com/

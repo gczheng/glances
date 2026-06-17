@@ -10,7 +10,6 @@ the developers managing and developing this open source project. In return,
 they should reciprocate that respect in addressing your issue or assessing
 patches and features.
 
-
 ## Using the issue tracker
 
 The [issue tracker](https://github.com/nicolargo/glances/issues) is
@@ -18,11 +17,11 @@ the preferred channel for [bug reports](#bug-reports), [features requests](#feat
 and [submitting pull requests](#pull-requests), but please respect the following
 restrictions:
 
-* Please **do not** use the issue tracker for personal support requests. A official Q&A exist. [Use it](https://groups.google.com/forum/?hl=en#!forum/glances-users)!
+* Please **do not** use the issue tracker for personal support requests. An
+  official Q&A exist. [Use it](https://groups.google.com/forum/?hl=en#!forum/glances-users)!
 
 * Please **do not** derail or troll issues. Keep the discussion on topic and
   respect the opinions of others.
-
 
 ## Bug reports
 
@@ -44,9 +43,9 @@ Guidelines for bug reports:
 
 Example:
 
-> Short and descriptive example bug report title
+> Short and descriptive example bug report title.
 >
-> Glances and psutil version used (glances -V)
+> Glances and psutil version used (glances -V).
 >
 > Operating system description (name and version).
 >
@@ -57,21 +56,23 @@ Example:
 > 2. This is the second step
 > 3. Further steps, etc.
 >
-> Screenshot (if usefull)
+> Screenshot (if useful)
 >
 > Any other information you want to share that is relevant to the issue being
 > reported. This might include the lines of code that you have identified as
 > causing the bug, and potential solutions (and your opinions on their
 > merits).
-
+>
+> You can also run Glances in debug mode (-d) and paste/bin the glances.conf file (<https://glances.readthedocs.io/en/latest/config.html>).
+>
+> Glances 3.2.0 or higher have also a --issue option to run a simple test. Please use it and copy/paste the output.
 
 ## Feature requests
 
 Feature requests are welcome. But take a moment to find out whether your idea
-fits with the scope and aims of the project. It's up to *you* to make a strong
+fits with the scope and aims of the project. It's up to _you* to make a strong
 case to convince the project's developers of the merits of this feature. Please
 provide as much detail and context as possible.
-
 
 ## Pull requests
 
@@ -125,25 +126,35 @@ included in the project:
 
 4. It's coding time !
    Please respect the following coding convention: [Elements of Python Style](https://github.com/amontalenti/elements-of-python-style)
-   Commit your changes in logical chunks. Please adhere to these [git commit
+
+5. Test you code using the Makefile:
+
+   * make format ==> Format your code thanks to the Ruff linter
+   * make run ==> Run Glances
+   * make run-webserver ==> Run a Glances Web Server
+   * make test ==> Run unit tests
+   * make docs ==> Update docs
+   * make webui ==> Compile a new Web UI
+
+6. Commit your changes in logical chunks. Please adhere to these [git commit
    message guidelines](http://tbaggery.com/2008/04/19/a-note-about-git-commit-messages.html)
    or your code is unlikely be merged into the main project. Use Git's
    [interactive rebase](https://help.github.com/articles/interactive-rebase)
    feature to tidy up your commits before making them public.
 
-5. Locally merge (or rebase) the upstream development branch into your topic branch:
+7. Locally merge (or rebase) the upstream development branch into your topic branch:
 
    ```bash
    git pull [--rebase] upstream develop
    ```
 
-6. Push your topic branch up to your fork:
+8. Push your topic branch up to your fork:
 
    ```bash
    git push origin <topic-branch-name>
    ```
 
-7. [Open a Pull Request](https://help.github.com/articles/using-pull-requests/)
+9. [Open a Pull Request](https://help.github.com/articles/using-pull-requests/)
     with a clear title and description against the `develop` branch.
 
 **IMPORTANT**: By submitting a patch, you agree to allow the project owners to

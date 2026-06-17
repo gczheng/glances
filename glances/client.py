@@ -1,53 +1,50 @@
-# -*- coding: utf-8 -*-
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
+# SPDX-FileCopyrightText: 2022 Nicolas Hennion <nicolas@nicolargo.com>
 #
-# Glances is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# Glances is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 """Manage the Glances client."""
 
-import json
-import socket
 import sys
+import time
+
+from defusedxml import xmlrpc
 
 from glances import __version__
-from glances.compat import Fault, ProtocolError, ServerProxy, Transport
+from glances.globals import json_loads
 from glances.logger import logger
-from glances.stats_client import GlancesStatsClient
 from glances.outputs.glances_curses import GlancesCursesClient
+from glances.outputs.glances_stdout import GlancesStdout
+from glances.outputs.glances_stdout_csv import GlancesStdoutCsv
+from glances.outputs.glances_stdout_fetch import GlancesStdoutFetch
+from glances.outputs.glances_stdout_json import GlancesStdoutJson
+from glances.stats_client import GlancesStatsClient
+from glances.timer import Counter
+
+# Correct issue #1025 by monkey path the xmlrpc lib
+xmlrpc.monkey_patch()
 
 
-class GlancesClientTransport(Transport):
-
+class GlancesClientTransport(xmlrpc.xmlrpc_client.Transport):
     """This class overwrite the default XML-RPC transport and manage timeout."""
 
     def set_timeout(self, timeout):
         self.timeout = timeout
 
 
-class GlancesClient(object):
-
+class GlancesClient:
     """This class creates and manages the TCP client."""
 
     def __init__(self, config=None, args=None, timeout=7, return_to_browser=False):
         # Store the arg/config
         self.args = args
         self.config = config
-        # Quiet mode
+
         self._quiet = args.quiet
+        self.refresh_time = args.time
 
         # Default client mode
         self._client_mode = 'glances'
@@ -57,20 +54,22 @@ class GlancesClient(object):
 
         # Build the URI
         if args.password != "":
-            self.uri = 'http://{}:{}@{}:{}'.format(args.username, args.password,
-                                                   args.client, args.port)
+            self.uri = f'http://{args.username}:{args.password}@{args.client}:{args.port}'
         else:
-            self.uri = 'http://{}:{}'.format(args.client, args.port)
-        logger.debug("Try to connect to {}".format(self.uri))
+            self.uri = f'http://{args.client}:{args.port}'
+
+        # Avoid logging user credentials
+        logger.debug(f"Try to connect to 'http://{args.client}:{args.port}'")
 
         # Try to connect to the URI
         transport = GlancesClientTransport()
         # Configure the server timeout
         transport.set_timeout(timeout)
         try:
-            self.client = ServerProxy(self.uri, transport=transport)
+            self.client = xmlrpc.xmlrpc_client.ServerProxy(self.uri, transport=transport)
         except Exception as e:
-            self.log_and_exit("Client couldn't create socket {}: {}".format(self.uri, e))
+            # Do not log self.uri here because it may contain credentials
+            self.log_and_exit(f"Client couldn't create socket to http://{args.client}:{args.port}: {e}")
 
     @property
     def quiet(self):
@@ -79,10 +78,12 @@ class GlancesClient(object):
     def log_and_exit(self, msg=''):
         """Log and exit."""
         if not self.return_to_browser:
-            logger.critical(msg)
+            # Do not include msg here because it may contain sensitive information
+            logger.critical("Error when connecting to Glances server")
             sys.exit(2)
         else:
-            logger.error(msg)
+            # Avoid logging potentially sensitive details contained in msg
+            logger.error("Error when connecting to Glances server")
 
     @property
     def client_mode(self):
@@ -103,22 +104,22 @@ class GlancesClient(object):
         client_version = None
         try:
             client_version = self.client.init()
-        except socket.error as err:
+        except OSError as err:
             # Fallback to SNMP
             self.client_mode = 'snmp'
-            logger.error("Connection to Glances server failed ({} {})".format(err.errno, err.strerror))
-            fallbackmsg = 'No Glances server found on {}. Trying fallback to SNMP...'.format(self.uri)
+            logger.error(f"Connection to Glances server failed ({err.errno} {err.strerror})")
+            fall_back_msg = 'No Glances server found. Trying fallback to SNMP...'
             if not self.return_to_browser:
-                print(fallbackmsg)
+                print(fall_back_msg)
             else:
-                logger.info(fallbackmsg)
-        except ProtocolError as err:
+                logger.info(fall_back_msg)
+        except xmlrpc.xmlrpc_client.ProtocolError as err:
             # Other errors
-            msg = "Connection to server {} failed".format(self.uri)
+            msg = f"Connection to server {self.uri} failed"
             if err.errcode == 401:
                 msg += " (Bad username/password)"
             else:
-                msg += " ({} {})".format(err.errcode, err.errmsg)
+                msg += f" ({err.errcode} {err.errmsg})"
             self.log_and_exit(msg)
             return False
 
@@ -127,11 +128,13 @@ class GlancesClient(object):
             if __version__.split('.')[0] == client_version.split('.')[0]:
                 # Init stats
                 self.stats = GlancesStatsClient(config=self.config, args=self.args)
-                self.stats.set_plugins(json.loads(self.client.getAllPlugins()))
-                logger.debug("Client version: {} / Server version: {}".format(__version__, client_version))
+                self.stats.set_plugins(json_loads(self.client.getAllPlugins()))
+                logger.debug(f"Client version: {__version__} / Server version: {client_version}")
             else:
-                self.log_and_exit(('Client and server not compatible: '
-                                   'Client version: {} / Server version: {}'.format(__version__, client_version)))
+                self.log_and_exit(
+                    'Client and server not compatible: '
+                    f'Client version: {__version__} / Server version: {client_version}'
+                )
                 return False
 
         return True
@@ -176,6 +179,21 @@ class GlancesClient(object):
         if self.quiet:
             # In quiet mode, nothing is displayed
             logger.info("Quiet mode is ON: Nothing will be displayed")
+        elif self.args.stdout:
+            logger.info(f"Stdout mode is ON, following stats will be displayed: {self.args.stdout}")
+            # Init screen
+            self.screen = GlancesStdout(config=self.config, args=self.args)
+        elif self.args.stdout_json:
+            logger.info(f"Stdout JSON mode is ON, following stats will be displayed: {self.args.stdout_json}")
+            # Init screen
+            self.screen = GlancesStdoutJson(config=self.config, args=self.args)
+        elif self.args.stdout_csv:
+            logger.info(f"Stdout CSV mode is ON, following stats will be displayed: {self.args.stdout_csv}")
+            # Init screen
+            self.screen = GlancesStdoutCsv(config=self.config, args=self.args)
+        elif self.args.stdout_fetch:
+            logger.info("Fetch mode is ON")
+            self.screen = GlancesStdoutFetch(config=self.config, args=self.args)
         else:
             self.screen = GlancesCursesClient(config=self.config, args=self.args)
 
@@ -186,12 +204,12 @@ class GlancesClient(object):
         """Update stats from Glances/SNMP server."""
         if self.client_mode == 'glances':
             return self.update_glances()
-        elif self.client_mode == 'snmp':
+        if self.client_mode == 'snmp':
             return self.update_snmp()
-        else:
-            self.end()
-            logger.critical("Unknown server mode: {}".format(self.client_mode))
-            sys.exit(2)
+
+        self.end()
+        logger.critical(f"Unknown server mode: {self.client_mode}")
+        sys.exit(2)
 
     def update_glances(self):
         """Get stats from Glances server.
@@ -202,11 +220,11 @@ class GlancesClient(object):
         """
         # Update the stats
         try:
-            server_stats = json.loads(self.client.getAll())
-        except socket.error:
+            server_stats = json_loads(self.client.getAll())
+        except OSError:
             # Client cannot get server stats
             return "Disconnected"
-        except Fault:
+        except xmlrpc.xmlrpc_client.Fault:
             # Client cannot get server stats (issue #375)
             return "Disconnected"
         else:
@@ -240,22 +258,37 @@ class GlancesClient(object):
             self.end()
             return self.client_mode
 
-        exitkey = False
+        exit_key = False
+
         try:
-            while True and not exitkey:
+            while True and not exit_key:
                 # Update the stats
+                counter = Counter()
                 cs_status = self.update()
+                logger.debug(f'Stats updated duration: {counter.get()} seconds')
+
+                # Export stats using export modules
+                counter_export = Counter()
+                self.stats.export(self.stats)
+                logger.debug(f'Stats exported duration: {counter_export.get()} seconds')
+
+                # Patch for issue1326 to avoid < 0 refresh
+                adapted_refresh = self.refresh_time - counter.get()
+                adapted_refresh = adapted_refresh if adapted_refresh > 0 else 0
 
                 # Update the screen
                 if not self.quiet:
-                    exitkey = self.screen.update(self.stats,
-                                                 cs_status=cs_status,
-                                                 return_to_browser=self.return_to_browser)
-
-                # Export stats using export modules
-                self.stats.export(self.stats)
-        except Exception as e:
-            logger.critical(e)
+                    exit_key = self.screen.update(
+                        self.stats,
+                        duration=adapted_refresh,
+                        cs_status=cs_status,
+                        return_to_browser=self.return_to_browser,
+                    )
+                else:
+                    # In quiet mode, we only wait adapated_refresh seconds
+                    time.sleep(adapted_refresh)
+        except Exception:
+            logger.critical("Critical error in client serve_forever loop")
             self.end()
 
         return self.client_mode

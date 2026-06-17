@@ -1,45 +1,19 @@
-# -*- coding: utf-8 -*-
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
+# SPDX-FileCopyrightText: 2024 Nicolas Hennion <nicolas@nicolargo.com>
 #
-# Glances is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# Glances is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 """Manage the folder list."""
 
-import os
-
-from glances.compat import range, nativestr
+from glances.globals import folder_size, nativestr
 from glances.logger import logger
-
-# Use the built-in version of scandir/walk if possible, otherwise
-# use the scandir module version
-scandir_tag = True
-try:
-    # For Python 3.5 or higher
-    from os import scandir
-except ImportError:
-    # For others...
-    try:
-        from scandir import scandir
-    except ImportError:
-        scandir_tag = False
+from glances.timer import Timer
 
 
-class FolderList(object):
-
+class FolderList:
     """This class describes the optional monitored folder list.
 
     The folder list is a list of 'important' folder to monitor.
@@ -56,18 +30,23 @@ class FolderList(object):
     __folder_list_max_size = 10
     # The folder list
     __folder_list = []
+    # Default refresh time is 30 seconds for this plugins
+    __default_refresh = 30
 
     def __init__(self, config):
         """Init the folder list from the configuration file, if it exists."""
         self.config = config
 
+        # A list of Timer
+        # One timer per folder
+        # default timer is __default_refresh, can be overwrite by folder_1_refresh=600
+        self.timer_folders = []
+        self.first_grab = True
+
         if self.config is not None and self.config.has_section('folders'):
-            if scandir_tag:
-                # Process monitoring list
-                logger.debug("Folder list configuration detected")
-                self.__set_folder_list('folders')
-            else:
-                logger.error('Scandir not found. Please use Python 3.5+ or install the scandir lib')
+            # Process monitoring list
+            logger.debug("Folder list configuration detected")
+            self.__set_folder_list('folders')
         else:
             self.__folder_list = []
 
@@ -76,22 +55,32 @@ class FolderList(object):
 
         The list is defined in the Glances configuration file.
         """
-        for l in range(1, self.__folder_list_max_size + 1):
+        for line in range(1, self.__folder_list_max_size + 1):
             value = {}
-            key = 'folder_' + str(l) + '_'
+            key = 'folder_' + str(line) + '_'
 
             # Path is mandatory
+            value['indice'] = str(line)
             value['path'] = self.config.get_value(section, key + 'path')
             if value['path'] is None:
                 continue
-            else:
-                value['path'] = nativestr(value['path'])
+            value['path'] = nativestr(value['path'])
 
             # Optional conf keys
+            # Refresh time
+            value['refresh'] = int(self.config.get_value(section, key + 'refresh', default=self.__default_refresh))
+            self.timer_folders.append(Timer(value['refresh']))
+            # Thresholds
             for i in ['careful', 'warning', 'critical']:
+                # Read threshold
                 value[i] = self.config.get_value(section, key + i)
-                if value[i] is None:
-                    logger.debug("No {} threshold for folder {}".format(i, value["path"]))
+                if value[i] is not None:
+                    logger.debug("{} threshold for folder {} is {}".format(i, value["path"], value[i]))
+                # Read action
+                action = self.config.get_value(section, key + i + '_action')
+                if action is not None:
+                    value[i + '_action'] = action
+                    logger.debug("{} action for folder {} is {}".format(i, value["path"], value[i + '_action']))
 
             # Add the item to the list
             self.__folder_list.append(value)
@@ -121,41 +110,33 @@ class FolderList(object):
         else:
             return None
 
-    def __folder_size(self, path):
-        """Return the size of the directory given by path
-
-        path: <string>"""
-
-        ret = 0
-        for f in scandir(path):
-            if f.is_dir() and (f.name != '.' or f.name != '..'):
-                ret += self.__folder_size(os.path.join(path, f.name))
-            else:
-                try:
-                    ret += f.stat().st_size
-                except OSError:
-                    pass
-
-        return ret
-
-    def update(self):
+    def update(self, key='path'):
         """Update the command result attributed."""
         # Only continue if monitor list is not empty
-        if len(self.__folder_list) == 0:
+        if not self.__folder_list:
             return self.__folder_list
 
         # Iter upon the folder list
         for i in range(len(self.get())):
             # Update folder size
-            try:
-                self.__folder_list[i]['size'] = self.__folder_size(self.path(i))
-            except OSError as e:
-                logger.debug('Cannot get folder size ({}). Error: {}'.format(self.path(i), e))
-                if e.errno == 13:
-                    # Permission denied
-                    self.__folder_list[i]['size'] = '!'
-                else:
-                    self.__folder_list[i]['size'] = '?'
+            if not self.first_grab and i in self.timer_folders and not self.timer_folders[i].finished():
+                continue
+            # Set the key (see issue #2327)
+            self.__folder_list[i]['key'] = key
+            # Get folder size
+            self.__folder_list[i]['size'], self.__folder_list[i]['errno'] = folder_size(self.path(i))
+            if self.__folder_list[i]['errno'] != 0:
+                logger.debug(
+                    'Folder size ({} ~ {}) may not be correct. Error: {}'.format(
+                        self.path(i), self.__folder_list[i]['size'], self.__folder_list[i]['errno']
+                    )
+                )
+            # Reset the timer
+            if i in self.timer_folders:
+                self.timer_folders[i].reset()
+
+        # It is no more the first time...
+        self.first_grab = False
 
         return self.__folder_list
 
@@ -163,17 +144,17 @@ class FolderList(object):
         """Return the monitored list (list of dict)."""
         return self.__folder_list
 
-    def set(self, newlist):
+    def set(self, new_list):
         """Set the monitored list (list of dict)."""
-        self.__folder_list = newlist
+        self.__folder_list = new_list
 
     def getAll(self):
         # Deprecated: use get()
         return self.get()
 
-    def setAll(self, newlist):
+    def setAll(self, new_list):
         # Deprecated: use set()
-        self.set(newlist)
+        self.set(new_list)
 
     def path(self, item):
         """Return the path of the item number (item)."""

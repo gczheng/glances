@@ -3,20 +3,22 @@ Glances
 
 .. image:: _static/screenshot-wide.png
 
-Glances is a cross-platform monitoring tool which aims to present a
-maximum of information in a minimum of space through a curses or Web
-based interface. It can adapt dynamically the displayed information
-depending on the terminal size.
+Glances is a cross-platform monitoring tool that aims to present
+maximum information in minimal space through either a curses-based
+or Web-based interface. It can dynamically adapt the displayed
+information depending on the terminal size.
 
-It can also work in client/server mode. Remote monitoring could be
-done via terminal, Web interface or API (XMLRPC and RESTful).
+It can also work in client/server mode. Remote monitoring can be
+done via terminal, Web interface, or API (XMLRPC and RESTful).
 
-Glances is written in Python and uses the `psutil`_ library to get
-information from your system.
+Stats can also be exported to :ref:`files or external databases<gw>`.
 
-Stats can also be exported to external time/value databases.
+It is also possible to use it in your own Python scripts thanks to
+the :ref:`Glances API<api>` or in any other application through
+the :ref:`RESTful API<api_restful>`.
 
-.. _psutil: https://github.com/giampaolo/psutil
+AI assistants (Claude, Cursor, …) can query Glances directly through the
+:ref:`MCP (Model Context Protocol) server<api_mcp>`.
 
 Table of Contents
 =================
@@ -28,8 +30,15 @@ Table of Contents
    quickstart
    cmds
    config
+   fetch
    aoa/index
    gw/index
-   api
+   api/python
+   api/restful
+   api/mcp
+   docker
    faq
    support
+
+.. _psutil: https://github.com/giampaolo/psutil
+

@@ -1,34 +1,21 @@
-# -*- coding: utf-8 -*-
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
+# SPDX-FileCopyrightText: 2024 Nicolas Hennion <nicolas@nicolargo.com>
 #
-# Glances is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# Glances is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 """Stdout interface class."""
 
 import time
 
+from glances.globals import printandflush
 from glances.logger import logger
 
 
-class GlancesStdout(object):
-
-    """
-    This class manages the Stdout display.
-    """
+class GlancesStdout:
+    """This class manages the Stdout display."""
 
     def __init__(self, config=None, args=None):
         # Init
@@ -40,43 +27,62 @@ class GlancesStdout(object):
 
     def build_list(self):
         """Return a list of tuples taken from self.args.stdout
-        [(plugin, attribute), ... ]"""
+
+        :return: A list of tuples. Example [(plugin, key, attribute), ... ]
+        """
         ret = []
         for p in self.args.stdout.split(','):
-            if '.' in p:
-                p, a = p.split('.')
-            else:
-                a = None
-            ret.append((p, a))
+            pka = p.split('.')
+            if len(pka) == 1:
+                # Only plugin name is provided
+                new = (pka[0], None, None)
+            elif len(pka) == 2:
+                # Plugin name and attribute is provided
+                new = (pka[0], None, pka[1])
+            elif len(pka) == 3:
+                # Plugin name, key and attribute are provided
+                new = (pka[0], pka[1], pka[2])
+            ret.append(new)
         return ret
 
     def end(self):
         pass
 
-    def update(self,
-               stats,
-               duration=3):
+    def update(self, stats, duration=3, cs_status=None, return_to_browser=False):
         """Display stats to stdout.
+
         Refresh every duration second.
         """
-        for plugin, attribute in self.plugins_list:
+        for plugin, key, attribute in self.plugins_list:
             # Check if the plugin exist and is enable
-            if plugin in stats.getPluginsList() and \
-               stats.get_plugin(plugin).is_enable():
+            if plugin in stats.getPluginsList() and stats.get_plugin(plugin).is_enabled():
                 stat = stats.get_plugin(plugin).get_export()
             else:
                 continue
+
             # Display stats
             if attribute is not None:
                 # With attribute
-                try:
-                    print("{}.{}: {}".format(plugin, attribute,
-                                             stat[attribute]))
-                except KeyError as err:
-                    logger.error("Can not display stat {}.{} ({})".format(plugin, attribute, err))
+                if isinstance(stat, dict):
+                    try:
+                        printandflush(f"{plugin}.{attribute}: {stat[attribute]}")
+                    except KeyError as err:
+                        logger.error(f"Can not display stat {plugin}.{attribute} ({err})")
+                elif isinstance(stat, list):
+                    for i in stat:
+                        if key is None:
+                            i_key = i[i['key']]
+                        elif str(key) == str(i[i['key']]):
+                            i_key = key
+                        else:
+                            continue
+                        try:
+                            printandflush(f"{plugin}.{i_key}.{attribute}: {i[attribute]}")
+                        except KeyError as err:
+                            logger.error(f"Can not display stat {plugin}.{attribute} ({err})")
             else:
                 # Without attribute
-                print("{}: {}".format(plugin, stat))
+                printandflush(f"{plugin}: {stat}")
 
         # Wait until next refresh
         if duration > 0:

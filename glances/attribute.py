@@ -1,34 +1,31 @@
-# -*- coding: utf-8 -*-
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
+# SPDX-FileCopyrightText: 2022 Nicolas Hennion <nicolas@nicolargo.com>
 #
-# Glances is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# Glances is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 """Attribute class."""
 
 from datetime import datetime
 
+# Ugly hack waiting for Python 3.10 deprecation
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
 
-class GlancesAttribute(object):
+    UTC = timezone.utc
 
+
+class GlancesAttribute:
     def __init__(self, name, description='', history_max_size=None):
         """Init the attribute
-        name: Attribute name (string)
-        description: Attribute human reading description (string)
-        history_max_size: Maximum size of the history list (default is no limit)
+
+        :param name: Attribute name (string)
+        :param description: Attribute human reading description (string)
+        :param history_max_size: Maximum size of the history list (default is no limit)
 
         History is stored as a list for tuple: [(date, value), ...]
         """
@@ -47,6 +44,7 @@ class GlancesAttribute(object):
     """
     Properties for the attribute name
     """
+
     @property
     def name(self):
         return self._name
@@ -58,6 +56,7 @@ class GlancesAttribute(object):
     """
     Properties for the attribute description
     """
+
     @property
     def description(self):
         return self._description
@@ -69,24 +68,26 @@ class GlancesAttribute(object):
     """
     Properties for the attribute value
     """
+
     @property
     def value(self):
         if self.history_len() > 0:
             return (self._value[1] - self.history_value()[1]) / (self._value[0] - self.history_value()[0])
-        else:
-            return None
+        return None
 
     @value.setter
     def value(self, new_value):
         """Set a value.
+
         Value is a tuple: (<timestamp>, <new_value>)
         """
-        self._value = (datetime.now(), new_value)
+        self._value = (datetime.now(UTC), new_value)
         self.history_add(self._value)
 
     """
     Properties for the attribute history
     """
+
     @property
     def history(self):
         return self._history
@@ -103,25 +104,23 @@ class GlancesAttribute(object):
         self._history = []
 
     def history_add(self, value):
-        """Add a value in the history
-        """
-        if self._history_max_size is None or self.history_len() < self._history_max_size:
+        """Add a value in the history"""
+        if self._history_max_size:
+            if self.history_len() >= self._history_max_size:
+                self._history.pop(0)
             self._history.append(value)
-        else:
-            self._history = self._history[1:] + [value]
 
     def history_size(self):
-        """Return the history size (maximum nuber of value in the history)
-        """
+        """Return the history size (maximum number of value in the history)"""
         return len(self._history)
 
     def history_len(self):
-        """Return the current history lenght
-        """
+        """Return the current history length"""
         return len(self._history)
 
     def history_value(self, pos=1):
         """Return the value in position pos in the history.
+
         Default is to return the latest value added to the history.
         """
         return self._history[-pos]
@@ -135,7 +134,6 @@ class GlancesAttribute(object):
         return [(i[0].isoformat(), i[1]) for i in self._history[-nb:]]
 
     def history_mean(self, nb=5):
-        """Return the mean on the <nb> values in the history.
-        """
+        """Return the mean on the <nb> values in the history."""
         _, v = zip(*self._history)
         return sum(v[-nb:]) / float(v[-1] - v[-nb])

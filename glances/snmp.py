@@ -1,21 +1,10 @@
-# -*- coding: utf-8 -*-
 #
 # This file is part of Glances.
 #
-# Copyright (C) 2018 Nicolargo <nicolas@nicolargo.com>
+# SPDX-FileCopyrightText: 2022 Nicolas Hennion <nicolas@nicolargo.com>
 #
-# Glances is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# SPDX-License-Identifier: LGPL-3.0-only
 #
-# Glances is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 import sys
 
@@ -24,19 +13,17 @@ from glances.logger import logger
 # Import mandatory PySNMP lib
 try:
     from pysnmp.entity.rfc3413.oneliner import cmdgen
-except ImportError:
-    logger.critical("PySNMP library not found. To install it: pip install pysnmp")
+except ImportError as e:
+    logger.debug(f"Can not import pysnmp-lextudio lib: {e}")
+    logger.critical("PySNMP library not found. To install it: pip install 'pysnmp-lextudio<6.2.0'")
     sys.exit(2)
 
 
-class GlancesSNMPClient(object):
-
+class GlancesSNMPClient:
     """SNMP client class (based on pysnmp library)."""
 
-    def __init__(self, host='localhost', port=161, version='2c',
-                 community='public', user='private', auth=''):
-
-        super(GlancesSNMPClient, self).__init__()
+    def __init__(self, host='localhost', port=161, version='2c', community='public', user='private', auth=''):
+        super().__init__()
         self.cmdGen = cmdgen.CommandGenerator()
 
         self.version = version
@@ -53,12 +40,9 @@ class GlancesSNMPClient(object):
         ret = {}
         for name, val in varBinds:
             if str(val) == '':
-                ret[name.prettyPrint()] = ''
+                ret[str(name)] = ''
             else:
-                ret[name.prettyPrint()] = val.prettyPrint()
-                # In Python 3, prettyPrint() return 'b'linux'' instead of 'linux'
-                if ret[name.prettyPrint()].startswith('b\''):
-                    ret[name.prettyPrint()] = ret[name.prettyPrint()][2:-1]
+                ret[str(name)] = val.prettyPrint()
         return ret
 
     def __get_result__(self, errorIndication, errorStatus, errorIndex, varBinds):
@@ -73,20 +57,16 @@ class GlancesSNMPClient(object):
 
         One request per OID list.
 
-        * oid: oid list
-        > Return a dict
+        :param oid: oid list
+        :return: a dict
         """
         if self.version == '3':
             errorIndication, errorStatus, errorIndex, varBinds = self.cmdGen.getCmd(
-                cmdgen.UsmUserData(self.user, self.auth),
-                cmdgen.UdpTransportTarget((self.host, self.port)),
-                *oid
+                cmdgen.UsmUserData(self.user, self.auth), cmdgen.UdpTransportTarget((self.host, self.port)), *oid
             )
         else:
             errorIndication, errorStatus, errorIndex, varBinds = self.cmdGen.getCmd(
-                cmdgen.CommunityData(self.community),
-                cmdgen.UdpTransportTarget((self.host, self.port)),
-                *oid
+                cmdgen.CommunityData(self.community), cmdgen.UdpTransportTarget((self.host, self.port)), *oid
             )
         return self.__get_result__(errorIndication, errorStatus, errorIndex, varBinds)
 
@@ -117,7 +97,7 @@ class GlancesSNMPClient(object):
                 cmdgen.UdpTransportTarget((self.host, self.port)),
                 non_repeaters,
                 max_repetitions,
-                *oid
+                *oid,
             )
         if self.version.startswith('2'):
             errorIndication, errorStatus, errorIndex, varBindTable = self.cmdGen.bulkCmd(
@@ -125,7 +105,7 @@ class GlancesSNMPClient(object):
                 cmdgen.UdpTransportTarget((self.host, self.port)),
                 non_repeaters,
                 max_repetitions,
-                *oid
+                *oid,
             )
         else:
             # Bulk request are not available with SNMP version 1
